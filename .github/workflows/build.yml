@@ -1,4 +1,4 @@
-name: Build Windows App
+name: Build Windows App (Single File)
 
 on:
   push:
@@ -13,11 +13,11 @@ jobs:
       uses: actions/checkout@v4
 
     - name: Set up Go
-      uses: actions/setup-go@v5
+      uses: setup-go@v5
       with:
         go-version: '1.22'
 
-    - name: Build Standalone Single-File EXE with Embedded Manifest
+    - name: Build with go-winres Embedded Manifest
       run: |
         if (!(Test-Path "go.mod")) {
             go mod init simple-app
@@ -25,20 +25,21 @@ jobs:
         go get github.com/tailscale/walk
         go mod tidy
 
-        # 1. 安装现代资源打包工具 go-winres
+        # 1. 安装 go-winres 工具
         go install github.com/tc-hib/go-winres@latest
         $goBin = (go env GOPATH) + "\bin"
         echo "$goBin" | Out-File -FilePath $env:GITHUB_PATH -Append
-
       shell: pwsh
 
-    - name: Generate and Build
+    - name: Generate Resources and Compile
       run: |
-        # 2. 初始化 winres 配置并生成带 ComCtl32 v6 清单的 syso 资源文件
+        # 2. 关键：必须先初始化（它会自动在项目里创建默认包含现代控件和高分屏支持的 winres.json 配置）
         go-winres init --force
+
+        # 3. 关键：根据配置生成 rsrc_windows_amd64.syso 目标文件到根目录
         go-winres make
 
-        # 3. 编译无黑窗口的单文件 exe（清单已被静态嵌入）
+        # 4. 编译无黑窗口的单文件 exe（此时 syso 会被 Go 自动吞进 exe 内部）
         go build -ldflags="-H windowsgui" -o simple-app.exe main.go
 
     - name: Upload Artifact
