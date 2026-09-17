@@ -9,22 +9,26 @@ jobs:
     runs-on: windows-latest
 
     steps:
+    - name: Check out code
+      uses: actions/checkout@v4
+
     - name: Set up Go
       uses: actions/setup-go@v5
       with:
         go-version: '1.22'
 
-    - name: Check out code
-      uses: actions/checkout@v4
+    - name: Verify files exist
+      run: |
+        # 打印当前目录的文件，确认 go.mod 和 main.go 是否存在
+        Get-ChildItem
 
-    - name: Build EXE (Hide Console Window)
+    - name: Build EXE
       run: |
         go mod tidy
-        # -ldflags="-H windowsgui" 用于隐藏程序运行时的黑窗口
         go build -ldflags="-H windowsgui" -o simple-app.exe main.go
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: simple-walk-app
+        name: simple-app
         path: simple-app.exe
