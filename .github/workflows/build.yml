@@ -1,4 +1,4 @@
-name: Build Windows App
+name: Build True Single-File EXE
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Build with go-winres default manifest
+    - name: Install go-winres
       run: |
         if (!(Test-Path "go.mod")) {
             go mod init simple-app
@@ -25,22 +25,23 @@ jobs:
         go get github.com/tailscale/walk
         go mod tidy
 
-        # 1. 安装 go-winres
+        # 安装打包工具并加入环境变量
         go install github.com/tc-hib/go-winres@latest
         $goBin = (go env GOPATH) + "\bin"
         echo "$goBin" | Out-File -FilePath $env:GITHUB_PATH -Append
       shell: pwsh
 
-    - name: Make and Compile
+    - name: Generate Resources and Build
       run: |
-        # 2. 让 go-winres 自动在当前目录初始化默认的资源配置（包含标准现代控件清单）
+        # 1. 关键：初始化（它会在当前目录下自动创建 winres/winres.json）
         go-winres init --force
 
-        # 3. 直接生成官方默认的 syso 文件
+        # 2. 关键：编译生成 syso 资源文件（它会自动去 winres/ 目录读取配置，并把 syso 输出到根目录）
         go-winres make
 
-        # 4. 编译单文件 exe
+        # 3. 编译无黑窗口的真正单文件 exe（清单已被静态缝合进 exe 内部）
         go build -ldflags="-H windowsgui" -o simple-app.exe main.go
+      shell: pwsh
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
