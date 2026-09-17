@@ -1,0 +1,30 @@
+name: Build Windows App
+
+on:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.22'
+
+    - name: Check out code
+      uses: actions/checkout@v4
+
+    - name: Build EXE (Hide Console Window)
+      run: |
+        go mod tidy
+        # -ldflags="-H windowsgui" 用于隐藏程序运行时的黑窗口
+        go build -ldflags="-H windowsgui" -o simple-app.exe main.go
+
+    - name: Upload Artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: simple-walk-app
+        path: simple-app.exe
