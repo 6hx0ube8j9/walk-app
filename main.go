@@ -7,11 +7,9 @@ import (
 	. "github.com/tailscale/walk/declarative"
 )
 
- 
 //go:generate go build -ldflags="-H windowsgui" -o simple-app.exe main.go
 func init() {}
 
-// 捕获错误并弹窗提示，防止程序静默闪退
 func handleError(err error) {
 	if err != nil {
 		walk.MsgBox(nil, "错误", err.Error(), walk.MsgBoxIconError)
@@ -33,6 +31,13 @@ func main() {
 		Title:    "简易窗口",
 		MinSize:  Size{Width: 300, Height: 150},
 		Layout:   VBox{},
+		
+		// 【关键修复】拦截右上角 X 关闭按钮，改为隐藏而不是销毁
+		OnClosing: func(canceled *bool, reason walk.CloseReason) {
+			*canceled = true // 取消默认退出
+			mw.Hide()         // 仅隐藏窗口，托盘存活
+		},
+
 		Children: []Widget{
 			Composite{
 				Layout: HBox{},
@@ -59,28 +64,31 @@ func main() {
 	// 启动时隐藏主窗口
 	mw.Hide()
 
-	// 创建托盘
-	ni, err = walk.NewNotifyIcon()
+	// 创建托盘（需传入主窗口句柄作为宿主）
+	ni, err = walk.NewNotifyIcon(mw)
 	handleError(err)
 	defer ni.Dispose()
 
 	err = ni.SetToolTip("点击打开简易程序")
 	handleError(err)
 
-	// 设置托盘图标
 	icon := walk.IconInformation()
 	err = ni.SetIcon(icon)
 	handleError(err)
 
-	// 点击托盘左键显示窗口
+	// 点击托盘左键显示/隐藏窗口
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
-			mw.Show()
-			mw.SetFocus()
+			if mw.Visible() {
+				mw.Hide()
+			} else {
+				mw.Show()
+				mw.SetFocus()
+			}
 		}
 	})
 
-	// 右键菜单：退出
+	// 右键菜单：真正退出程序
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出")
 	exitAction.Triggered().Attach(func() {
@@ -91,6 +99,5 @@ func main() {
 	err = ni.SetVisible(true)
 	handleError(err)
 
-	// 运行主循环
 	app.Run()
 }
