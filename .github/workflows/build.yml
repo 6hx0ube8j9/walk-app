@@ -1,4 +1,4 @@
-name: Build Full-Featured EXE
+name: Build Release EXE
 
 on:
   push:
@@ -33,8 +33,10 @@ jobs:
 
     - name: Generate Resources and Compile EXE
       run: |
+        # 让 go-winres 读取 winres.json 自动生成正确的二进制 syso
         go-winres make
 
+        # 编译当前包，打包进单文件 exe
         go build -ldflags="-H windowsgui" -o simple-app.exe .
       shell: pwsh
 
