@@ -1,23 +1,28 @@
 package main
 
 import (
+	"log"
+
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 )
 
 func main() {
+	// Tailscale fork 使用 walk.InitApp() 初始化
+	app, err := walk.InitApp()
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer app.Exit(0)
+
 	var mw *walk.MainWindow
 	var ni *walk.NotifyIcon
 
-	// 初始化 Walk GUI
-	walk.Initialize()
-	defer walk.Shutdown()
-
-	// 创建隐藏的主窗口（作为托盘宿主和控制中心）
+	// 创建主窗口
 	if err := (MainWindow{
 		AssignTo: &mw,
 		Title:    "简易窗口",
-		MinSize:  Size{Width: 300, Size: Size{Height: 150}, Height: 150},
+		MinSize:  Size{Width: 300, Height: 150},
 		Layout:   VBox{},
 		Children: []Widget{
 			Composite{
@@ -27,64 +32,61 @@ func main() {
 					PushButton{
 						Text: "确定",
 						OnClicked: func() {
-							mw.Hide() // 点击确定后隐藏窗口
+							mw.Hide()
 						},
 					},
 					PushButton{
 						Text: "取消",
 						OnClicked: func() {
-							mw.Hide() // 点击取消后隐藏窗口
+							mw.Hide()
 						},
 					},
 				},
 			},
 		},
 	}).Create(); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
-	// 隐藏主窗口，不让它在启动时直接显示
+	// 启动时隐藏窗口
 	mw.Hide()
 
-	// 创建系统托盘图标
-	ni, err := walk.NewNotifyIcon(mw)
+	// 创建系统托盘图标（Tailscale fork 的参数为 MainWindow 传入）
+	ni, err = walk.NewNotifyIcon(mw)
 	if err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 	defer ni.Dispose()
 
-	// 设置托盘图标提示文字
 	if err := ni.SetToolTip("点击打开简易程序"); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
-	// 这里使用内置的标准图标（也可以换成你自己的 .ico 文件）
-	if err := ni.SetIcon(walk.IconStandardInformation()); err != nil {
-		panic(err)
+	// 使用应用自带的默认图标
+	if err := ni.SetIcon(mw.Icon()); err != nil {
+		log.Fatal(err)
 	}
 
-	// 核心：点击托盘图标时打开 GUI 窗口
+	// 点击托盘左键显示窗口
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
-			mw.Visible()
 			mw.Show()
 			mw.SetFocus()
 		}
 	})
 
-	// 添加右键菜单：退出程序
+	// 右键菜单：退出
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出")
 	exitAction.Triggered().Attach(func() {
-		walk.App().Exit(0)
+		app.Exit(0)
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 
-	// 让托盘图标可见
 	if err := ni.SetVisible(true); err != nil {
-		panic(err)
+		log.Fatal(err)
 	}
 
-	// 运行主消息循环
-	mw.Run()
+	// 运行应用主循环
+	app.Run()
 }
