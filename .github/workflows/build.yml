@@ -17,17 +17,20 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Verify files exist
+    - name: Initialize Modules & Build EXE
       run: |
-        Get-ChildItem
-
-    - name: Build EXE
-      run: |
+        # 确保生成 go.mod 和 go.sum 缓存
+        if (!(Test-Path "go.mod")) {
+            go mod init simple-app
+        }
+        go get github.com/tailscale/walk
         go mod tidy
+        
+        # 编译程序，-ldflags="-H windowsgui" 用于隐藏后台黑窗口
         go build -ldflags="-H windowsgui" -o simple-app.exe main.go
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: simple-app
+        name: simple-app-exe
         path: simple-app.exe
