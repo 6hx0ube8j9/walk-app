@@ -25,23 +25,18 @@ jobs:
         go get github.com/tailscale/walk
         go mod tidy
 
-        # 安装 go-winres 工具
         go install github.com/tc-hib/go-winres@latest
         
-        # 将 GOPATH/bin 写入环境变量，确保能调用 go-winres
         $goBin = (go env GOPATH) + "\bin"
         echo "$goBin" | Out-File -FilePath $env:GITHUB_PATH -Append
       shell: pwsh
 
     - name: Generate Resources and Compile EXE
       run: |
-        # 1. 自动读取 winres/winres.json 并生成 .syso 资源文件
         go-winres make
         
-        # 2. 检查当前目录下是否成功生成了 .syso 文件（用于日志排查）
         Get-ChildItem -Filter "*.syso"
         
-        # 3. 编译 Windows GUI 程序，隐藏黑窗口(-H windowsgui)并减小体积(-s -w)
         go build -ldflags="-H windowsgui -s -w" -o simple-app.exe .
       shell: pwsh
 
