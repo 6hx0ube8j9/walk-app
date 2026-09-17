@@ -7,7 +7,7 @@ import (
 	. "github.com/tailscale/walk/declarative"
 )
 
-// 捕获错误并弹窗提示，防止程序静默闪退
+//go:generate go run github.com/akavel/rsrc -manifest app.manifest -o rsrc.syso
 func handleError(err error) {
 	if err != nil {
 		walk.MsgBox(nil, "错误", err.Error(), walk.MsgBoxIconError)
