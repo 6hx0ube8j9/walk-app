@@ -1,25 +1,31 @@
 package main
 
 import (
-	"log"
+	"fmt"
+	"os"
 
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 )
 
-func main() {
-	// 初始化应用
-	app, err := walk.InitApp()
+// 捕获错误并弹窗提示，防止程序静默闪退
+func handleError(err error) {
 	if err != nil {
-		log.Fatal(err)
+		walk.MsgBox(nil, "错误", err.Error(), walk.MsgBoxIconError)
+		os.Exit(1)
 	}
+}
+
+func main() {
+	app, err := walk.InitApp()
+	handleError(err)
 	defer app.Exit(0)
 
 	var mw *walk.MainWindow
 	var ni *walk.NotifyIcon
 
 	// 创建主窗口
-	if err := (MainWindow{
+	err = (MainWindow{
 		AssignTo: &mw,
 		Title:    "简易窗口",
 		MinSize:  Size{Width: 300, Height: 150},
@@ -44,28 +50,25 @@ func main() {
 				},
 			},
 		},
-	}).Create(); err != nil {
-		log.Fatal(err)
-	}
+	}).Create()
+	handleError(err)
 
 	// 启动时隐藏主窗口
 	mw.Hide()
 
-	// 创建系统托盘图标（Tailscale fork 版本无需传参）
+	// 创建托盘
 	ni, err = walk.NewNotifyIcon()
-	if err != nil {
-		log.Fatal(err)
-	}
+	handleError(err)
 	defer ni.Dispose()
 
-	if err := ni.SetToolTip("点击打开简易程序"); err != nil {
-		log.Fatal(err)
-	}
+	err = ni.SetToolTip("点击打开简易程序")
+	handleError(err)
 
-	// 使用窗口图标赋给托盘
-	if err := ni.SetIcon(mw.Icon()); err != nil {
-		log.Fatal(err)
-	}
+	// 使用系统的标准信息图标，防止自定义或窗口图标加载失败
+	icon, err := walk.IconStandardInformation()
+	handleError(err)
+	err = ni.SetIcon(icon)
+	handleError(err)
 
 	// 点击托盘左键显示窗口
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
@@ -83,10 +86,9 @@ func main() {
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 
-	if err := ni.SetVisible(true); err != nil {
-		log.Fatal(err)
-	}
+	err = ni.SetVisible(true)
+	handleError(err)
 
-	// 运行应用主循环
+	// 运行
 	app.Run()
 }
