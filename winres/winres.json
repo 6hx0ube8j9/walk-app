@@ -20,7 +20,6 @@
   "RT_MANIFEST": {
     "#1": {
       "0409": {
-        "minimum-os": "win7",
         "execution-level": "asInvoker",
         "ui-access": false,
         "dpi-awareness": "per-monitor"
