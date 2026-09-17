@@ -7,7 +7,11 @@ import (
 	. "github.com/tailscale/walk/declarative"
 )
 
-//go:generate go run github.com/akavel/rsrc -manifest app.manifest -o rsrc.syso
+ 
+//go:generate go build -ldflags="-H windowsgui" -o simple-app.exe main.go
+func init() {}
+
+// 捕获错误并弹窗提示，防止程序静默闪退
 func handleError(err error) {
 	if err != nil {
 		walk.MsgBox(nil, "错误", err.Error(), walk.MsgBoxIconError)
@@ -63,7 +67,7 @@ func main() {
 	err = ni.SetToolTip("点击打开简易程序")
 	handleError(err)
 
-	// walk.IconInformation() 只返回 1 个值
+	// 设置托盘图标
 	icon := walk.IconInformation()
 	err = ni.SetIcon(icon)
 	handleError(err)
