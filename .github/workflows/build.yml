@@ -1,4 +1,4 @@
-name: Build with Walk Official Method
+name: Build with go-winres (Single File)
 
 on:
   push:
@@ -17,7 +17,7 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Install rsrc Tool
+    - name: Install go-winres and Dependencies
       run: |
         if (!(Test-Path "go.mod")) {
             go mod init simple-app
@@ -25,17 +25,18 @@ jobs:
         go get github.com/tailscale/walk
         go mod tidy
 
-        # 安装 rsrc 工具
-        go install github.com/akavel/rsrc@latest
+        # 1. 安装 go-winres
+        go install github.com/tc-hib/go-winres@latest
 
-        # 将 Go 的 bin 目录加入环境变量
+        # 2. 将 Go 的 bin 目录加入环境变量
         $goBin = (go env GOPATH) + "\bin"
         echo "$goBin" | Out-File -FilePath $env:GITHUB_PATH -Append
       shell: pwsh
 
-    - name: Generate Syso and Compile
+    - name: Generate Resources via winres and Compile
       run: |
-        rsrc -manifest app.manifest -o rsrc.syso
+        go-winres init --force
+        go-winres make
 
         go build -ldflags="-H windowsgui" -o simple-app.exe .
       shell: pwsh
