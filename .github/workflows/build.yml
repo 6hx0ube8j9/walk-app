@@ -17,26 +17,32 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Build EXE
+    - name: Build Standalone Single-File EXE with Embedded Manifest
       run: |
         if (!(Test-Path "go.mod")) {
             go mod init simple-app
         }
         go get github.com/tailscale/walk
         go mod tidy
-        
-        # 编译生成无黑窗口的 exe
-        go build -ldflags="-H windowsgui" -o simple-app.exe main.go
 
-    - name: Prepare Manifest File
+        # 1. 安装现代资源打包工具 go-winres
+        go install github.com/tc-hib/go-winres@latest
+        $goBin = (go env GOPATH) + "\bin"
+        echo "$goBin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      shell: pwsh
+
+    - name: Generate and Build
       run: |
-        # 自动复制并重命名为 Windows 规范的伴生清单文件
-        Copy-Item "app.manifest" "simple-app.exe.manifest"
+        # 2. 初始化 winres 配置并生成带 ComCtl32 v6 清单的 syso 资源文件
+        go-winres init --force
+        go-winres make
+
+        # 3. 编译无黑窗口的单文件 exe（清单已被静态嵌入）
+        go build -ldflags="-H windowsgui" -o simple-app.exe main.go
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: simple-app-package
-        path: |
-          simple-app.exe
-          simple-app.exe.manifest
+        name: simple-app-single-file
+        path: simple-app.exe
