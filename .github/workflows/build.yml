@@ -17,23 +17,33 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Build EXE
+    - name: Compile Manifest and Build EXE
       run: |
         if (!(Test-Path "go.mod")) {
             go mod init simple-app
         }
         go get github.com/tailscale/walk
         go mod tidy
-        go build -ldflags="-H windowsgui" -o simple-app.exe main.go
 
-    - name: Copy Manifest for Windows Controls
+        # 1. 安装 rsrc 工具
+        go install github.com/akavel/rsrc@latest
+
+        # 2. 将 Go 的 bin 目录（rsrc 存放处）加入当前步骤的环境变量 PATH 中
+        $goBin = (go env GOPATH) + "\bin"
+        echo "$goBin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      shell: pwsh
+
+    - name: Build with Embedded Manifest
       run: |
-        Copy-Item "app.manifest" "simple-app.exe.manifest"
+        # 3. 根据根目录下的 app.manifest 生成 rsrc.syso 资源文件
+        rsrc -manifest app.manifest -o rsrc.syso
+
+        # 4. 编译程序（Go 编译时会自动把同目录下的 rsrc.syso 作为 Windows 资源打包进 exe）
+        go build -ldflags="-H windowsgui" -o simple-app.exe main.go
 
     - name: Upload Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: simple-app-package
-        path: |
-          simple-app.exe
-          simple-app.exe.manifest
+        name: simple-app-exe
+        path: simple-app.exe
