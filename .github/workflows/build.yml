@@ -28,18 +28,16 @@ jobs:
         # 安装 rsrc 工具
         go install github.com/akavel/rsrc@latest
 
-        # 将 Go 的 bin 目录加入环境变量，让 powershell 能找到 rsrc 命令
+        # 将 Go 的 bin 目录加入环境变量
         $goBin = (go env GOPATH) + "\bin"
         echo "$goBin" | Out-File -FilePath $env:GITHUB_PATH -Append
       shell: pwsh
 
     - name: Generate Syso and Compile
       run: |
-        # 使用 app.manifest 生成 rsrc.syso 资源文件
         rsrc -manifest app.manifest -o rsrc.syso
 
-        # 编译生成自带清单的纯单文件 exe
-        go build -ldflags="-H windowsgui" -o simple-app.exe main.go
+        go build -ldflags="-H windowsgui" -o simple-app.exe .
       shell: pwsh
 
     - name: Upload Artifact
