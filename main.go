@@ -63,9 +63,8 @@ func main() {
 	err = ni.SetToolTip("点击打开简易程序")
 	handleError(err)
 
-	// 使用正确的标准信息图标
-	icon, err := walk.IconInformation()
-	handleError(err)
+	// walk.IconInformation() 只返回 1 个值
+	icon := walk.IconInformation()
 	err = ni.SetIcon(icon)
 	handleError(err)
 
