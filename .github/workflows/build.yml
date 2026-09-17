@@ -19,7 +19,6 @@ jobs:
 
     - name: Verify files exist
       run: |
-        # 打印当前目录的文件，确认 go.mod 和 main.go 是否存在
         Get-ChildItem
 
     - name: Build EXE
