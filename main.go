@@ -8,7 +8,7 @@ import (
 )
 
 func main() {
-	// Tailscale fork 使用 walk.InitApp() 初始化
+	// 初始化应用
 	app, err := walk.InitApp()
 	if err != nil {
 		log.Fatal(err)
@@ -48,11 +48,11 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// 启动时隐藏窗口
+	// 启动时隐藏主窗口
 	mw.Hide()
 
-	// 创建系统托盘图标（Tailscale fork 的参数为 MainWindow 传入）
-	ni, err = walk.NewNotifyIcon(mw)
+	// 创建系统托盘图标（Tailscale fork 版本无需传参）
+	ni, err = walk.NewNotifyIcon()
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -62,7 +62,7 @@ func main() {
 		log.Fatal(err)
 	}
 
-	// 使用应用自带的默认图标
+	// 使用窗口图标赋给托盘
 	if err := ni.SetIcon(mw.Icon()); err != nil {
 		log.Fatal(err)
 	}
