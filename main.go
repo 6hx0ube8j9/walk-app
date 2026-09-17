@@ -1,82 +1,49 @@
 package main
 
 import (
-	"os"
-
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 )
 
-//go:generate go build -ldflags="-H windowsgui" -o simple-app.exe main.go
-func init() {}
-
-func handleError(err error) {
-	if err != nil {
-		walk.MsgBox(nil, "错误", err.Error(), walk.MsgBoxIconError)
-		os.Exit(1)
-	}
-}
-
 func main() {
-	app, err := walk.InitApp()
-	handleError(err)
-	defer app.Exit(0)
-
 	var mw *walk.MainWindow
-	var ni *walk.NotifyIcon
 
-	// 创建主窗口
-	err = (MainWindow{
+	// 1. 创建主窗口（默认自带最大化、最小化和关闭按钮）
+	if err := (MainWindow{
 		AssignTo: &mw,
-		Title:    "简易窗口",
-		MinSize:  Size{Width: 300, Height: 150},
+		Title:    "简易托盘面板",
+		MinSize:  Size{Width: 300, Height: 200},
 		Layout:   VBox{},
-		
-		// 【关键修复】拦截右上角 X 关闭按钮，改为隐藏而不是销毁
-		OnClosing: func(canceled *bool, reason walk.CloseReason) {
-			*canceled = true // 取消默认退出
-			mw.Hide()         // 仅隐藏窗口，托盘存活
-		},
-
 		Children: []Widget{
-			Composite{
-				Layout: HBox{},
-				Children: []Widget{
-					HSpacer{},
-					PushButton{
-						Text: "确定",
-						OnClicked: func() {
-							mw.Hide()
-						},
-					},
-					PushButton{
-						Text: "取消",
-						OnClicked: func() {
-							mw.Hide()
-						},
-					},
-				},
+			PushButton{
+				Text:      "隐藏面板",
+				OnClicked: func() { mw.Hide() },
 			},
 		},
-	}).Create()
-	handleError(err)
+	}).Create(); err != nil {
+		panic(err)
+	}
 
-	// 启动时隐藏主窗口
+	// 2. 拦截右上角 X 或 Alt+F4 关闭事件，改为隐藏而不是销毁
+	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		*canceled = true // 取消默认退出
+		mw.Hide()         // 仅隐藏窗口，托盘和后台保持存活
+	})
+
+	// 启动时默认隐藏面板
 	mw.Hide()
 
-	// 创建托盘（需传入主窗口句柄作为宿主）
-	ni, err = walk.NewNotifyIcon(mw)
-	handleError(err)
+	// 3. 初始化系统托盘（注意这里无参数）
+	ni, err := walk.NewNotifyIcon()
+	if err != nil {
+		panic(err)
+	}
 	defer ni.Dispose()
 
-	err = ni.SetToolTip("点击打开简易程序")
-	handleError(err)
+	ni.SetToolTip("点击打开面板")
+	ni.SetIcon(walk.IconInformation())
 
-	icon := walk.IconInformation()
-	err = ni.SetIcon(icon)
-	handleError(err)
-
-	// 点击托盘左键显示/隐藏窗口
+	// 左键点击托盘：显示/隐藏面板
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
 			if mw.Visible() {
@@ -92,12 +59,11 @@ func main() {
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出")
 	exitAction.Triggered().Attach(func() {
-		app.Exit(0)
+		walk.App().Exit(0)
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
+	ni.SetVisible(true)
 
-	err = ni.SetVisible(true)
-	handleError(err)
-
-	app.Run()
+	// 4. 运行主消息循环
+	walk.App().Run()
 }
