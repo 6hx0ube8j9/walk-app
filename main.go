@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/tailscale/walk"
@@ -64,8 +63,8 @@ func main() {
 	err = ni.SetToolTip("点击打开简易程序")
 	handleError(err)
 
-	// 使用系统的标准信息图标，防止自定义或窗口图标加载失败
-	icon, err := walk.IconStandardInformation()
+	// 使用正确的标准信息图标
+	icon, err := walk.IconInformation()
 	handleError(err)
 	err = ni.SetIcon(icon)
 	handleError(err)
@@ -89,6 +88,6 @@ func main() {
 	err = ni.SetVisible(true)
 	handleError(err)
 
-	// 运行
+	// 运行主循环
 	app.Run()
 }
