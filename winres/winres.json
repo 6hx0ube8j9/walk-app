@@ -1,0 +1,14 @@
+{
+  "product-version": "1.0.0.0",
+  "file-version": "1.0.0.0",
+  "info": {
+    "CompanyName": "My Company",
+    "FileDescription": "My Walk GUI Application",
+    "ProductName": "SimpleApp",
+    "LegalCopyright": "Copyright (C) 2026"
+  },
+  "manifest": {
+    "requested-execution-level": "asInvoker",
+    "dpi-aware": "per-monitor"
+  }
+}
