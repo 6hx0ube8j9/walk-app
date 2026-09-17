@@ -1,28 +1,9 @@
 {
-  "RT_VERSION": {
-    "#1": {
-      "0000": {
-        "fixed": {
-          "file_version": "1.0.0.0",
-          "product_version": "1.0.0.0"
-        },
-        "info": {
-          "0409": {
-            "CompanyName": "My Company",
-            "FileDescription": "My Walk GUI Application",
-            "ProductName": "SimpleApp",
-            "LegalCopyright": "Copyright (C) 2026"
-          }
-        }
-      }
-    }
-  },
   "RT_MANIFEST": {
     "#1": {
       "0409": {
         "execution-level": "asInvoker",
-        "ui-access": false,
-        "dpi-awareness": "per-monitor"
+        "ui-access": false
       }
     }
   }
