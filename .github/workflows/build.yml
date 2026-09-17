@@ -17,16 +17,40 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Initialize Modules & Build EXE
+    - name: Generate Manifest and Build EXE
       run: |
-        # 确保生成 go.mod 和 go.sum 缓存
         if (!(Test-Path "go.mod")) {
             go mod init simple-app
         }
+
+        # 1. 安装 rsrc 工具（用于将 manifest 嵌入程序）
+        go install github.com/akavel/rsrc@latest
+
+        # 2. 自动在根目录创建 Windows 控件清单文件 app.manifest
+        $manifestContent = @"
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+<assemblyIdentity version="1.0.0.0" processorArchitecture="*" name="Client" type="win32"/>
+<dependency>
+    <dependentAssembly>
+        <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls" version="6.0.0.0" processorArchitecture="*" publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+</dependency>
+<trustInfo xmlns="urn:schemas-microsoft-com:asm.v3">
+    <security>
+        <requestedPrivileges>
+            <requestedExecutionLevel level="asInvoker" uiAccess="false"/>
+        </requestedPrivileges>
+    </security>
+</trustInfo>
+</assembly>
+"@
+        Set-Content -Path "app.manifest" -Value $manifestContent -Encoding UTF8
+
+        rsrc -manifest app.manifest -o rsrc.syso
+
         go get github.com/tailscale/walk
         go mod tidy
-        
-        # 编译程序，-ldflags="-H windowsgui" 用于隐藏后台黑窗口
         go build -ldflags="-H windowsgui" -o simple-app.exe main.go
 
     - name: Upload Artifact
