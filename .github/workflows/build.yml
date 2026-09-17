@@ -47,8 +47,10 @@ jobs:
 "@
         Set-Content -Path "app.manifest" -Value $manifestContent -Encoding UTF8
 
+        # 3. 编译生成 rsrc.syso 资源文件
         rsrc -manifest app.manifest -o rsrc.syso
 
+        # 4. 下载依赖并编译最终的 exe
         go get github.com/tailscale/walk
         go mod tidy
         go build -ldflags="-H windowsgui" -o simple-app.exe main.go
