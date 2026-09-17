@@ -7,9 +7,9 @@
     "ProductName": "SimpleApp",
     "LegalCopyright": "Copyright (C) 2026"
   },
-  "RT_MANIFEST": {
-    "#1": {
-      "0409": "app.manifest"
-    }
+  "manifest": {
+    "requested-execution-level": "asInvoker",
+    "dpi-awareness": "per-monitor",
+    "minimum-os": "win7"
   }
 }
