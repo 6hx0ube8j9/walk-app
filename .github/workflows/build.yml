@@ -1,4 +1,4 @@
-name: Build with go-winres (Single File)
+name: Build Single-File App with go-winres
 
 on:
   push:
@@ -17,25 +17,31 @@ jobs:
       with:
         go-version: '1.22'
 
-    - name: Install go-winres and Dependencies
+    - name: Set up Environment & Dependencies
       run: |
+        # 1. 如果没有 go.mod，自动初始化
         if (!(Test-Path "go.mod")) {
             go mod init simple-app
         }
+        
+        # 2. 拉取 walk 依赖
         go get github.com/tailscale/walk
+        
+        # 3. 自动生成/更新 go.sum 文件
         go mod tidy
 
-        # 1. 安装 go-winres
+        # 4. 安装 go-winres 工具
         go install github.com/tc-hib/go-winres@latest
-
-        # 2. 将 Go 的 bin 目录加入环境变量
+        
+        # 5. 将 Go bin 路径写入环境变量
         $goBin = (go env GOPATH) + "\bin"
         echo "$goBin" | Out-File -FilePath $env:GITHUB_PATH -Append
       shell: pwsh
 
-    - name: Generate Resources via winres and Compile
+    - name: Generate Resources and Compile EXE
       run: |
         go-winres init --force
+
         go-winres make
 
         go build -ldflags="-H windowsgui" -o simple-app.exe .
