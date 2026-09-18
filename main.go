@@ -49,7 +49,7 @@ func main() {
 	go svc.Run(ctx)
 
 	// 5. 构建并挂载 UI 引擎（整合 Window + Tray + Hook）
-	engine, err := ui.NewUIEngine(walkApp, cmdCh, stateCh, effectCh, AppName)
+	_, err := ui.NewUIEngine(walkApp, cmdCh, stateCh, effectCh, AppName)
 	if err != nil {
 		log.Fatalf("初始化 UI 失败: %v", err)
 	}
