@@ -8,13 +8,13 @@ import (
 	"github.com/tailscale/walk"
 )
 
-type ErrorPresenter interface {
+type ErrorDialogPresenter interface {
 	ShowError(owner walk.Form, title, message string)
 }
 
-type DefaultErrorPresenter struct{}
+type DefaultDialogPresenter struct{}
 
-func (p *DefaultErrorPresenter) ShowError(owner walk.Form, title, message string) {
+func (p *DefaultDialogPresenter) ShowError(owner walk.Form, title, message string) {
 	ShowErrorDialog(owner, title, message)
 }
 
@@ -22,7 +22,7 @@ type App struct {
 	WalkApp   *walk.Application
 	MW        *walk.MainWindow
 	Tray      *TrayManager
-	Presenter ErrorPresenter
+	Presenter ErrorDialogPresenter
 
 	// 状态机字段（模拟业务状态）
 	IsNetworkReady bool
@@ -36,12 +36,11 @@ func NewApp() (*App, error) {
 
 	return &App{
 		WalkApp:        walkApp,
-		Presenter:      &DefaultErrorPresenter{},
-		IsNetworkReady: false, // 初始网络设为未连接，用于模拟触发错误
+		Presenter:      &DefaultDialogPresenter{},
+		IsNetworkReady: false, // 初始网络设为未连接，模拟触发错误
 	}, nil
 }
 
-// HandleOperation 统一意图响应入口：GUI 和托盘仅抛出 action，由 App 做决策
 func (a *App) HandleOperation(action string) {
 	err := a.executeBusinessLogic(action)
 	if err != nil {
@@ -52,7 +51,6 @@ func (a *App) HandleOperation(action string) {
 	log.Printf("[SUCCESS] 操作 [%s] 执行成功\n", action)
 }
 
-// executeBusinessLogic 纯业务规则计算（不含任何 UI 代码，极易单测）
 func (a *App) executeBusinessLogic(action string) error {
 	switch action {
 	case "sync_data":
@@ -71,7 +69,6 @@ func (a *App) executeBusinessLogic(action string) error {
 	return nil
 }
 
-// ShowError 统一错误弹窗调度，自动保证 UI 线程安全
 func (a *App) ShowError(title, message string) {
 	log.Printf("[ERROR] %s: %s\n", title, message)
 
