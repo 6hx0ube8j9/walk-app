@@ -3,6 +3,7 @@ package main
 import (
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
+	"github.com/tailscale/win"
 )
 
 //go:generate go build -ldflags="-H windowsgui" -o app_b.exe main.go
@@ -15,7 +16,7 @@ func main() {
 	defer app.Exit(0)
 
 	var mw *walk.MainWindow
-	err = (MainWindow{
+	err = MainWindow{
 		AssignTo: &mw,
 		Title:    "流派B - 单进程显隐面板",
 		MinSize:  Size{Width: 300, Height: 200},
@@ -23,16 +24,21 @@ func main() {
 		Children: []Widget{
 			Label{Text: "点击右上角 X 会自动隐藏到托盘，而不是退出程序"},
 		},
-	}).Create()
+
+		OnClosing: func(canceled *bool, reason walk.CloseReason) {
+
+			if reason == walk.CloseReasonUnknown {
+				*canceled = true
+				mw.Synchronize(func() {
+					mw.Hide()
+				})
+			}
+		},
+	}.Create()
+
 	if err != nil {
 		return
 	}
-
-	// 核心：拦截右上角 X 关闭事件，改为隐藏窗口
-	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		*canceled = true
-		mw.Hide()
-	})
 
 	// 启动时默认隐藏窗口，只留托盘
 	mw.Hide()
@@ -52,8 +58,10 @@ func main() {
 			if mw.Visible() {
 				mw.Hide()
 			} else {
+				// 修复点4：结合底层 API 突破 Windows 焦点限制，确保面板一定会弹到最前面
 				mw.Show()
-				mw.SetFocus()
+				win.ShowWindow(mw.Handle(), win.SW_RESTORE)
+				win.SetForegroundWindow(mw.Handle())
 			}
 		}
 	})
@@ -62,7 +70,7 @@ func main() {
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
-		app.Exit(0)
+		app.Exit(0) 
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 	ni.SetVisible(true)
