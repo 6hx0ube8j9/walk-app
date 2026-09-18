@@ -1,19 +1,26 @@
 package main
 
 import (
-	"github.com/lxn/walk"
-	. "github.com/lxn/walk/declarative"
-	"github.com/lxn/win"
+	"github.com/tailscale/walk"
+	. "github.com/tailscale/walk/declarative"
+	"github.com/tailscale/win"
 )
 
 //go:generate go build -ldflags="-H windowsgui" -o app_b.exe main.go
 
 func main() {
+	// 1. Tailscale 分支特有的 App 初始化
+	app, err := walk.InitApp()
+	if err != nil {
+		return
+	}
+	defer app.Exit(0)
+
 	var mw *walk.MainWindow
 
-	err := MainWindow{
+	err = MainWindow{
 		AssignTo: &mw,
-		Title:    "流派B - 原版 Walk 单进程",
+		Title:    "流派B - Tailscale Walk",
 		MinSize:  Size{Width: 300, Height: 200},
 		Layout:   VBox{},
 		Children: []Widget{
@@ -26,31 +33,32 @@ func main() {
 	}
 
 	// ================= 核心防御机制 =================
-	// 自己掌控命运：定义真实退出标志，完全不信任 walk 的 CloseReason
 	var isExiting bool
 
 	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		// 只要 isExiting 不是 true，任何人、任何操作点 X 都无法关掉它
 		if !isExiting {
 			*canceled = true // 强制拦截关闭指令
-			mw.Hide()        // 瞬间隐藏面板
+			
+			// 【致命细节】Tailscale 分支必须使用 Synchronize 将 UI 操作推迟到下一个安全周期
+			mw.Synchronize(func() {
+				mw.Hide()
+			})
 		}
 	})
 	// ===============================================
 
-	// 启动时默认隐藏窗口，只留托盘
 	mw.Hide()
 
-	ni, err := walk.NewNotifyIcon(mw)
+	// 2. Tailscale 分支的托盘不需要绑定主窗口句柄
+	ni, err := walk.NewNotifyIcon()
 	if err != nil {
 		return
 	}
 	defer ni.Dispose()
 
-	ni.SetToolTip("原版 Walk 托盘常驻")
+	ni.SetToolTip("Tailscale Walk 托盘")
 	ni.SetIcon(walk.IconInformation())
 
-	// 左键点击托盘：切换面板显隐状态
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
 			if mw.Visible() {
@@ -63,19 +71,19 @@ func main() {
 		}
 	})
 
-	// 右键菜单：真正退出程序
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
-		// 1. 改变标志位，给 Closing 拦截器放行
 		isExiting = true 
+		ni.Dispose() // 提前销毁托盘，防止残留图标
 		
-		mw.Close() 
+		// 3. Tailscale 分支通过主动退出 App 来终结生命周期
+		app.Exit(0)
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 
 	ni.SetVisible(true)
 
-	// 原版的灵魂：由 MainWindow 维持系统消息循环
-	mw.Run()
+	// Tailscale 分支通过 app.Run() 维持消息循环
+	app.Run()
 }
