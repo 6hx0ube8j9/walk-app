@@ -4,9 +4,9 @@ import (
 	"log"
 	"runtime"
 
-	"myapp/internal/core"
-	"myapp/internal/platform"
-	"myapp/internal/ui"
+	"walk-app/internal/core"
+	"walk-app/internal/platform"
+	"walk-app/internal/ui"
 
 	"github.com/tailscale/walk"
 )
