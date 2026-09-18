@@ -1,9 +1,6 @@
 package main
 
 import (
-	"runtime"
-	"syscall"
-
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 	"github.com/tailscale/win"
@@ -11,22 +8,16 @@ import (
 
 //go:generate go build -ldflags="-H windowsgui" -o app_b.exe main.go
 
-func init() {
-	// 关键：将当前协程锁定在主 OS 线程，防止 Win32 消息循环因线程切换失效
-	runtime.LockOSThread()
-}
-
-// 错误辅助函数：在 GUI 模式下遇到致命错误弹出窗口提示，代替静默 return
-func showError(msg string) {
-	captionPtr, _ := syscall.UTF16PtrFromString("启动异常")
-	msgPtr, _ := syscall.UTF16PtrFromString(msg)
-	win.MessageBox(0, msgPtr, captionPtr, win.MB_ICONERROR|win.MB_OK)
-}
-
 func main() {
+	// 1. tailscale/walk 必须最先显式初始化 App 单例
+	app, err := walk.InitApp()
+	if err != nil {
+		return
+	}
+
 	var mw *walk.MainWindow
 
-	err := MainWindow{
+	err = MainWindow{
 		AssignTo: &mw,
 		Title:    "Walk 单进程",
 		MinSize:  Size{Width: 300, Height: 200},
@@ -37,7 +28,6 @@ func main() {
 	}.Create()
 
 	if err != nil {
-		showError("MainWindow 创建失败: " + err.Error())
 		return
 	}
 
@@ -45,17 +35,17 @@ func main() {
 
 	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
 		if !isExiting {
-			*canceled = true
-			mw.Hide()
+			*canceled = true // 强制拦截关闭指令
+			mw.Hide()        // 瞬间隐藏面板
 		}
 	})
 
-	// 启动时隐藏主窗口
+	// 启动时默认隐藏窗口，只留托盘
 	mw.Hide()
 
+	// 2. tailscale/walk 的 NotifyIcon 无需传参
 	ni, err := walk.NewNotifyIcon()
 	if err != nil {
-		showError("NotifyIcon 创建失败: " + err.Error())
 		return
 	}
 	defer ni.Dispose()
@@ -75,29 +65,18 @@ func main() {
 		}
 	})
 
-	// 直接从已有 ContextMenu 中添加 Action
+	// 右键菜单：真正退出程序
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
 		isExiting = true
 		mw.Close()
-		win.PostQuitMessage(0)
+		app.Exit(0) // 退出全局消息循环
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 
-	if err := ni.SetVisible(true); err != nil {
-		showError("托盘图标设置可见失败: " + err.Error())
-		return
-	}
+	ni.SetVisible(true)
 
-	// Win32 标准消息循环
-	var msg win.MSG
-	for {
-		ret := win.GetMessage(&msg, 0, 0, 0)
-		if ret == 0 || ret == -1 {
-			break
-		}
-		win.TranslateMessage(&msg)
-		win.DispatchMessage(&msg)
-	}
+	// 3. 由 app.Run() 取代原先的 mw.Run()
+	app.Run()
 }
