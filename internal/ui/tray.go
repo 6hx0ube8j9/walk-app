@@ -4,7 +4,7 @@ import (
 	"syscall"
 	"unsafe"
 
-	"myapp/internal/core"
+	"walk-app/internal/core"
 
 	"github.com/tailscale/walk"
 	"github.com/tailscale/win"
