@@ -1,12 +1,18 @@
 package main
 
 import (
+	"log"
+	"runtime"
+
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 	"github.com/tailscale/win"
 )
 
-//go:generate go build -ldflags="-H windowsgui" -o app_b.exe main.go
+func init() {
+	// 关键：将当前 goroutine 永久锁死在主 OS 线程，防止 Win32 消息循环失效
+	runtime.LockOSThread()
+}
 
 func main() {
 	var mw *walk.MainWindow
@@ -22,25 +28,25 @@ func main() {
 	}.Create()
 
 	if err != nil {
-		return
+		log.Fatalf("MainWindow 创建失败: %v", err)
 	}
 
 	var isExiting bool
 
 	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
 		if !isExiting {
-			*canceled = true // 强制拦截关闭指令
-			mw.Hide()        // 瞬间隐藏面板
+			*canceled = true
+			mw.Hide()
 		}
 	})
 
-	// 启动时默认隐藏窗口，只留托盘
+	// 启动时隐藏主窗口
 	mw.Hide()
 
-	// 修复 1：tailscale/walk 的 NewNotifyIcon 无需传参
+	// 初始化托盘
 	ni, err := walk.NewNotifyIcon()
 	if err != nil {
-		return
+		log.Fatalf("NotifyIcon 创建失败: %v", err)
 	}
 	defer ni.Dispose()
 
@@ -59,23 +65,36 @@ func main() {
 		}
 	})
 
-	// 右键菜单：真正退出程序
+	// 关键防护：确保 ContextMenu 已初始化，防止 nil pointer panic
+	menu := ni.ContextMenu()
+	if menu == nil {
+		menu, err = walk.NewMenu()
+		if err != nil {
+			log.Fatalf("ContextMenu 创建失败: %v", err)
+		}
+		ni.SetContextMenu(menu)
+	}
+
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
-		isExiting = true 
-
+		isExiting = true
 		mw.Close()
-		// 退出时向当前线程发送退出消息，终结 Win32 消息循环
 		win.PostQuitMessage(0)
 	})
-	ni.ContextMenu().Actions().Add(exitAction)
+	menu.Actions().Add(exitAction)
 
-	ni.SetVisible(true)
+	if err := ni.SetVisible(true); err != nil {
+		log.Fatalf("托盘图标显示失败: %v", err)
+	}
 
-	// 修复 2：替代 mw.Run()，采用标准的 Win32 消息循环
+	// Win32 标准消息循环
 	var msg win.MSG
-	for win.GetMessage(&msg, 0, 0, 0) > 0 {
+	for {
+		ret := win.GetMessage(&msg, 0, 0, 0)
+		if ret == 0 || ret == -1 {
+			break // 0 表示接收到 WM_QUIT，-1 表示异常
+		}
 		win.TranslateMessage(&msg)
 		win.DispatchMessage(&msg)
 	}
