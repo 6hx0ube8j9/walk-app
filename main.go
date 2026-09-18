@@ -1,13 +1,28 @@
 package main
 
 import (
+	"fmt"
+	"runtime/debug"
+	"syscall"
+	"time"
+
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 	"github.com/tailscale/win"
 )
 
+//go:generate go build -ldflags="-s -w" -o app_b.exe main.go
 
 func main() {
+
+	defer func() {
+		if r := recover(); r != nil {
+			errStr := fmt.Sprintf("程序发生致命崩溃 (Panic):\n%v\n\n堆栈信息:\n%s", r, string(debug.Stack()))
+			win.MessageBox(0, syscall.StringToUTF16Ptr(errStr), syscall.StringToUTF16Ptr("致命错误"), win.MB_ICONERROR|win.MB_TOPMOST)
+		}
+	}()
+	// ==================================================
+
 	app, err := walk.InitApp()
 	if err != nil {
 		return
@@ -17,11 +32,11 @@ func main() {
 	var mw *walk.MainWindow
 	err = MainWindow{
 		AssignTo: &mw,
-		Title:    "流派B - 降维打击防闪退",
+		Title:    "流派B - 终极捕获版",
 		MinSize:  Size{Width: 300, Height: 200},
 		Layout:   VBox{},
 		Children: []Widget{
-			Label{Text: "点击右上角 X 会安全隐藏，绝对不崩溃"},
+			Label{Text: "如果这次再关闭，一定会弹窗告诉你具体的报错代码行！"},
 		},
 	}.Create()
 
@@ -31,18 +46,21 @@ func main() {
 
 	var isExiting bool
 
-	// ---------------- 终极防御机制 ----------------
 	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
 		if !isExiting {
-			*canceled = true 
-			
-			win.ShowWindow(mw.Handle(), win.SW_HIDE)
+			*canceled = true
+
+			go func() {
+				time.Sleep(50 * time.Millisecond)
+				mw.Synchronize(func() {
+					mw.Hide()
+				})
+			}()
 		}
 	})
-	// ----------------------------------------------
+	// ------------------------------------------------
 
-	// 启动时也用底层 API 隐藏
-	win.ShowWindow(mw.Handle(), win.SW_HIDE)
+	mw.Hide()
 
 	ni, err := walk.NewNotifyIcon()
 	if err != nil {
@@ -50,16 +68,15 @@ func main() {
 	}
 	defer ni.Dispose()
 
-	ni.SetToolTip("Mihomo Tray 测试")
+	ni.SetToolTip("Mihomo Tray 稳定版")
 	ni.SetIcon(walk.IconInformation())
 
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
-			// 判断可见性同样使用底层 API
-			if win.IsWindowVisible(mw.Handle()) {
-				win.ShowWindow(mw.Handle(), win.SW_HIDE)
+			if mw.Visible() {
+				mw.Hide()
 			} else {
-				win.ShowWindow(mw.Handle(), win.SW_SHOW)
+				mw.Show()
 				win.ShowWindow(mw.Handle(), win.SW_RESTORE)
 				win.SetForegroundWindow(mw.Handle())
 			}
