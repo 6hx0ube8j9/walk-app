@@ -20,44 +20,45 @@ func init() {
 }
 
 func main() {
-	// 1. 单实例互斥检查
 	lock, ok := AcquireSingleInstance(MutexName, AppName)
 	if !ok {
 		return
 	}
 	defer lock.Release()
 
-	// 2. 初始化 Walk 应用
 	app, err := walk.InitApp()
 	if err != nil {
 		log.Fatalf("初始化 App 失败: %v", err)
 	}
 
-	// 3. 声明并创建窗口
 	var mw *walk.MainWindow
 	err = MainWindow{
 		AssignTo: &mw,
 		Title:    AppName,
 		MinSize:  Size{Width: 360, Height: 240},
-		Layout:   VBox{},
+		Layout:   VBox{Margins: Margins{Top: 20, Bottom: 20, Left: 20, Right: 20}, Spacing: 12},
 		Children: []Widget{
 			Label{Text: "程序已进入后台保护运行。\n点击右上角 X 会直接隐藏到托盘。"},
+			VSpacer{Size: 10},
+			PushButton{
+				Text: "测试错误弹窗",
+				OnClicked: func() {
+					ShowErrorDialog(mw, "界面错误", "这是一条由主界面按钮触发的异常提示！")
+				},
+			},
 		},
 	}.Create()
 	if err != nil {
 		log.Fatalf("创建窗口失败: %v", err)
 	}
 
-	// 启动时隐藏主面板
 	mw.Hide()
 
-	// 4. 挂载托盘与消息托管器
 	tray, err := SetupTrayManager(app, mw, AppName)
 	if err != nil {
 		log.Fatalf("初始化托盘失败: %v", err)
 	}
 	defer tray.Exit()
 
-	// 5. 进入主事件循环
 	app.Run()
 }
