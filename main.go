@@ -1,6 +1,8 @@
 package main
 
 import (
+	"syscall"
+
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 	"github.com/tailscale/win"
@@ -9,7 +11,6 @@ import (
 //go:generate go build -ldflags="-H windowsgui" -o app_b.exe main.go
 
 func main() {
-	// 1. tailscale/walk 必须最先显式初始化 App 单例
 	app, err := walk.InitApp()
 	if err != nil {
 		return
@@ -19,11 +20,11 @@ func main() {
 
 	err = MainWindow{
 		AssignTo: &mw,
-		Title:    "Walk 单进程",
+		Title:    "单进程后台常驻",
 		MinSize:  Size{Width: 300, Height: 200},
 		Layout:   VBox{},
 		Children: []Widget{
-			Label{Text: "点击右上角 X 会自动隐藏到托盘，绝不会退出"},
+			Label{Text: "点击右上角 X 会直接隐藏到托盘，绝不退出"},
 		},
 	}.Create()
 
@@ -31,26 +32,28 @@ func main() {
 		return
 	}
 
-	var isExiting bool
-
-	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		if !isExiting {
-			*canceled = true // 强制拦截关闭指令
-			mw.Hide()        // 瞬间隐藏面板
+	// 核心修复：通过底层 Win32 Subclass 强行拦截 WM_CLOSE 消息
+	var oldWndProc uintptr
+	newWndProc := syscall.NewCallback(func(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+		if msg == win.WM_CLOSE {
+			win.ShowWindow(hwnd, win.SW_HIDE) // 拦截关闭，直接隐藏窗口
+			return 0                          // 吃掉消息，阻止 Win32 继续分发销毁窗体
 		}
+		return win.CallWindowProc(oldWndProc, hwnd, msg, wParam, lParam)
 	})
+	oldWndProc = win.SetWindowLongPtr(mw.Handle(), win.GWLP_WNDPROC, newWndProc)
 
-	// 启动时默认隐藏窗口，只留托盘
+	// 初始隐藏
 	mw.Hide()
 
-	// 2. tailscale/walk 的 NotifyIcon 无需传参
+	// 托盘初始化
 	ni, err := walk.NewNotifyIcon()
 	if err != nil {
 		return
 	}
 	defer ni.Dispose()
 
-	ni.SetToolTip("Tailscale Walk 托盘常驻")
+	ni.SetToolTip("后台常驻程序")
 	ni.SetIcon(walk.IconInformation())
 
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
@@ -65,18 +68,17 @@ func main() {
 		}
 	})
 
-	// 右键菜单：真正退出程序
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
-		isExiting = true
+		// 真正退出时，先解除钩子再退出
+		win.SetWindowLongPtr(mw.Handle(), win.GWLP_WNDPROC, oldWndProc)
 		mw.Close()
-		app.Exit(0) // 退出全局消息循环
+		app.Exit(0)
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 
 	ni.SetVisible(true)
 
-	// 3. 由 app.Run() 取代原先的 mw.Run()
 	app.Run()
 }
