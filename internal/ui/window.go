@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"myapp/internal/core"
+	"walk-app/internal/core"
 
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
