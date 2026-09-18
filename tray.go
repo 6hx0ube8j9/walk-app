@@ -27,7 +27,6 @@ type TrayManager struct {
 	oldWndProc uintptr
 }
 
-// SetupTrayManager 为主窗口挂载托盘与消息保护
 func SetupTrayManager(app *walk.Application, mw *walk.MainWindow, toolTip string) (*TrayManager, error) {
 	ni, err := walk.NewNotifyIcon()
 	if err != nil {
@@ -43,27 +42,35 @@ func SetupTrayManager(app *walk.Application, mw *walk.MainWindow, toolTip string
 	ni.SetToolTip(toolTip)
 	ni.SetIcon(walk.IconInformation())
 
-	// 单击切换显隐
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
 			tm.ToggleWindow()
 		}
 	})
 
-	// 右键菜单
+	// 1. 显示/隐藏面板
 	showAction := walk.NewAction()
 	showAction.SetText("显示/隐藏主界面")
 	showAction.Triggered().Attach(tm.ToggleWindow)
 	ni.ContextMenu().Actions().Add(showAction)
 
+	// 2. 新增：测试错误弹窗
+	testAction := walk.NewAction()
+	testAction.SetText("测试错误弹窗")
+	testAction.Triggered().Attach(func() {
+		ShowErrorDialog(mw, "托盘警告", "这是一条由托盘右键菜单触发的异常提示！")
+	})
+	ni.ContextMenu().Actions().Add(testAction)
+
 	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
 
+	// 3. 退出程序
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(tm.Exit)
 	ni.ContextMenu().Actions().Add(exitAction)
 
-	// 挂载 Win32 消息钩子
+	// Win32 底层消息拦截
 	newWndProc := syscall.NewCallback(func(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 		switch msg {
 		case win.WM_CLOSE:
