@@ -1,11 +1,6 @@
 package main
 
 import (
-	"fmt"
-	"runtime/debug"
-	"syscall"
-	"time"
-
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 	"github.com/tailscale/win"
@@ -14,53 +9,41 @@ import (
 //go:generate go build -ldflags="-s -w" -o app_b.exe main.go
 
 func main() {
-
-	defer func() {
-		if r := recover(); r != nil {
-			errStr := fmt.Sprintf("程序发生致命崩溃 (Panic):\n%v\n\n堆栈信息:\n%s", r, string(debug.Stack()))
-			win.MessageBox(0, syscall.StringToUTF16Ptr(errStr), syscall.StringToUTF16Ptr("致命错误"), win.MB_ICONERROR|win.MB_TOPMOST)
-		}
-	}()
-	// ==================================================
-
 	app, err := walk.InitApp()
 	if err != nil {
 		return
 	}
 	defer app.Exit(0)
 
-	var mw *walk.MainWindow
+	var root *walk.MainWindow
 	err = MainWindow{
-		AssignTo: &mw,
-		Title:    "流派B - 终极捕获版",
-		MinSize:  Size{Width: 300, Height: 200},
-		Layout:   VBox{},
-		Children: []Widget{
-			Label{Text: "如果这次再关闭，一定会弹窗告诉你具体的报错代码行！"},
-		},
+		AssignTo: &root,
+		Title:    "Hidden Root",
+		Visible:  false, // 核心：永远不要调用 root.Show()
 	}.Create()
-
 	if err != nil {
 		return
 	}
 
-	var isExiting bool
+	var ui *walk.Dialog
+	err = Dialog{
+		AssignTo: &ui,
+		Title:    "Mihomo Tray 面板",
+		MinSize:  Size{Width: 300, Height: 200},
+		Layout:   VBox{},
+		Children: []Widget{
+			Label{Text: "这次随便点右上角的 X，托盘绝对死不了！"},
+		},
+	}.Create(root) // 将隐藏的 root 作为它的父窗口
+	if err != nil {
+		return
+	}
 
-	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		if !isExiting {
-			*canceled = true
-
-			go func() {
-				time.Sleep(50 * time.Millisecond)
-				mw.Synchronize(func() {
-					mw.Hide()
-				})
-			}()
-		}
+	// 3. 拦截 Dialog 的关闭事件，改为单纯的隐藏
+	ui.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		*canceled = true
+		ui.Hide() // Dialog 的隐藏非常安全，再也不会牵连整个程序了
 	})
-	// ------------------------------------------------
-
-	mw.Hide()
 
 	ni, err := walk.NewNotifyIcon()
 	if err != nil {
@@ -73,12 +56,12 @@ func main() {
 
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
-			if mw.Visible() {
-				mw.Hide()
+			if ui.Visible() {
+				ui.Hide()
 			} else {
-				mw.Show()
-				win.ShowWindow(mw.Handle(), win.SW_RESTORE)
-				win.SetForegroundWindow(mw.Handle())
+				ui.Show()
+				win.ShowWindow(ui.Handle(), win.SW_RESTORE)
+				win.SetForegroundWindow(ui.Handle())
 			}
 		}
 	})
@@ -86,12 +69,12 @@ func main() {
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
-		isExiting = true 
 		ni.Dispose()
-		app.Exit(0)
+		app.Exit(0) // 只有这里才会真正终结程序
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 	ni.SetVisible(true)
 
+	// 运行主循环，它会被隐藏的 root 窗口永远维持住
 	app.Run()
 }
