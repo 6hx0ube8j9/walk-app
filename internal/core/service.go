@@ -2,20 +2,19 @@ package core
 
 import (
 	"context"
-	"fmt"
 	"walk-app/internal/types"
 )
 
 type Service struct {
 	cmdCh    <-chan types.UICommand
-	stateCh  chan<- types.UIState
+	stateCh  chan types.UIState // 改为双向 channel，允许在丢旧帧时读取
 	effectCh chan<- types.UIEffect
 
 	// 领域业务状态
 	isNetworkReady bool
 }
 
-func NewService(cmdCh <-chan types.UICommand, stateCh chan<- types.UIState, effectCh chan<- types.UIEffect) *Service {
+func NewService(cmdCh <-chan types.UICommand, stateCh chan types.UIState, effectCh chan<- types.UIEffect) *Service {
 	return &Service{
 		cmdCh:          cmdCh,
 		stateCh:        stateCh,
@@ -53,7 +52,6 @@ func (s *Service) handleCommand(cmd types.UICommand) {
 			}
 			return
 		}
-		// 成功则更新状态
 		s.emitState()
 
 	case "export_report":
@@ -68,7 +66,7 @@ func (s *Service) handleCommand(cmd types.UICommand) {
 		s.emitState()
 
 	case "exit_app":
-		// 业务层做完资源收尾后，下发退出指令
+		// 业务层做完收尾后下发退出指令
 		s.effectCh <- types.UIEffect{Type: "ExitApp"}
 	}
 }
@@ -84,12 +82,12 @@ func (s *Service) emitState() {
 		StatusText:     status,
 	}
 
-	// 丢旧帧保最新机制：防止 UI 渲染慢反向卡死 Core
+	// 丢旧帧保最新：容量为 1 的管道满时，挤掉旧值换入最新值
 	select {
 	case s.stateCh <- state:
 	default:
 		select {
-		case <-s.stateCh:
+		case <-s.stateCh: // 读出旧帧腾出位置
 		default:
 		}
 		s.stateCh <- state
