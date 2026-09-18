@@ -1,62 +1,52 @@
 package main
 
 import (
-	"github.com/tailscale/walk"
-	. "github.com/tailscale/walk/declarative"
-	"github.com/tailscale/win"
+	"github.com/lxn/walk"
+	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 )
 
 //go:generate go build -ldflags="-H windowsgui" -o app_b.exe main.go
 
 func main() {
-	app, err := walk.InitApp()
-	if err != nil {
-		return
-	}
-	defer app.Exit(0)
-
 	var mw *walk.MainWindow
-	err = MainWindow{
+
+	err := MainWindow{
 		AssignTo: &mw,
-		Title:    "流派B - 单进程显隐面板",
+		Title:    "流派B - 原版 Walk 单进程",
 		MinSize:  Size{Width: 300, Height: 200},
 		Layout:   VBox{},
 		Children: []Widget{
-			Label{Text: "点击右上角 X 会自动隐藏到托盘，而不是退出程序"},
+			Label{Text: "点击右上角 X 会自动隐藏到托盘，绝不会退出"},
 		},
 	}.Create()
-
+	
 	if err != nil {
 		return
 	}
 
-	// ---------------- 终极防御机制 ----------------
-	// 抛弃 walk 极度不可靠的 CloseReason，用自己的标志位判断是“最小化”还是“真退出”
-	var isExiting bool
-
+	// ---------------- 原版 Walk 的标准拦截 ----------------
+	// 在 lxn/walk 中，拦截非常可靠，不需要乱七八糟的异步处理
 	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		if !isExiting {
-			*canceled = true // 拦截销毁
-
-			// 核心：绝对不能在这里直接写 mw.Hide()，否则必引发静默崩溃（闪退）！
-			// 必须用 Synchronize 异步执行隐藏
-			mw.Synchronize(func() {
-				mw.Hide()
-			})
+		// CloseReasonUser 代表用户点了 X 或者按了 Alt+F4
+		if reason == walk.CloseReasonUser {
+			*canceled = true // 拦截系统销毁窗口的指令
+			mw.Hide()        // 直接隐藏
 		}
 	})
-	// ----------------------------------------------
+	// ----------------------------------------------------
 
 	// 启动时默认隐藏窗口，只留托盘
 	mw.Hide()
 
-	ni, err := walk.NewNotifyIcon()
+	// 核心差异：原版 walk 创建托盘必须绑定到一个窗口句柄 (mw)
+	ni, err := walk.NewNotifyIcon(mw)
 	if err != nil {
 		return
 	}
-	defer ni.Dispose() // 正常流程销毁
+	defer ni.Dispose()
 
-	ni.SetToolTip("流派B - 单进程常驻")
+	ni.SetToolTip("原版 Walk 托盘常驻")
 	ni.SetIcon(walk.IconInformation())
 
 	// 左键点击托盘：切换面板显隐状态
@@ -66,7 +56,7 @@ func main() {
 				mw.Hide()
 			} else {
 				mw.Show()
-				// 突破 Windows 防打扰机制，强行置顶前台
+				// 原版也需要借助 win API 突破 Windows 前台焦点限制
 				win.ShowWindow(mw.Handle(), win.SW_RESTORE)
 				win.SetForegroundWindow(mw.Handle())
 			}
@@ -77,12 +67,14 @@ func main() {
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
-		isExiting = true // 标记为真退出，放行 Closing 拦截
-		ni.Dispose()     // 手动提前销毁托盘，防止 Windows 任务栏留下幽灵图标
-		app.Exit(0)
+		// 发送全局退出信号，这会打破 mw.Run() 的阻塞
+		walk.App().Exit(0)
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
+	
 	ni.SetVisible(true)
 
-	app.Run()
+	// 核心差异：原版 walk 使用主窗口的 Run() 维持系统消息循环
+	// 只要 mw 没被销毁，这个循环就不会停
+	mw.Run()
 }
