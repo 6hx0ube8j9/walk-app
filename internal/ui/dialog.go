@@ -47,7 +47,6 @@ func ShowErrorDialog(owner walk.Form, title, message string) {
 		return
 	}
 
-	// 布局完成后、渲染展示前挂载屏幕中央计算
 	dlg.Starting().Attach(func() {
 		if parent == nil {
 			var rect win.RECT
