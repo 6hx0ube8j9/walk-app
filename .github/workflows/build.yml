@@ -22,7 +22,7 @@ jobs:
         if (!(Test-Path "go.mod")) {
             go mod init simple-app
         }
-        go get github.com/tailscale/walk
+        
         go mod tidy
 
         go install github.com/tc-hib/go-winres@latest
