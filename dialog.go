@@ -1,17 +1,19 @@
 package main
 
 import (
+	"unsafe"
+
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 	"github.com/tailscale/win"
 )
 
-// ShowErrorDialog 弹出一个默认在屏幕正中央的错误提示 GUI 窗口
+// ShowErrorDialog 弹出一个错误提示 GUI 窗口
+// 当主面板显示时以面板为中心，当主面板隐藏/不存在时以屏幕工作区为中心
 func ShowErrorDialog(owner walk.Form, title, message string) {
 	var dlg *walk.Dialog
 	var acceptPB *walk.PushButton
 
-	// 如果主窗口处于隐藏状态，避免绑定 owner 导致弹窗无法前置
 	var parent walk.Form
 	if owner != nil && owner.Visible() {
 		parent = owner
@@ -49,22 +51,29 @@ func ShowErrorDialog(owner walk.Form, title, message string) {
 		return
 	}
 
-	// 计算屏幕居中坐标
-	var rect win.RECT
-	win.GetWindowRect(dlg.Handle(), &rect)
-	dlgWidth := rect.Right - rect.Left
-	dlgHeight := rect.Bottom - rect.Top
+	// 挂载到 Starting 事件：在布局完成但窗口尚未绘制出来的瞬间计算并修正位置
+	dlg.Starting().Attach(func() {
+		if parent == nil {
+			// 获取弹窗自身的真实宽高
+			var rect win.RECT
+			win.GetWindowRect(dlg.Handle(), &rect)
+			dlgW := rect.Right - rect.Left
+			dlgH := rect.Bottom - rect.Top
 
-	screenWidth := win.GetSystemMetrics(win.SM_CXSCREEN)
-	screenHeight := win.GetSystemMetrics(win.SM_CYSCREEN)
+			// 获取屏幕工作区尺寸（自动避开任务栏占据的区域）
+			var workArea win.RECT
+			win.SystemParametersInfo(win.SPI_GETWORKAREA, 0, unsafe.Pointer(&workArea), 0)
+			workW := workArea.Right - workArea.Left
+			workH := workArea.Bottom - workArea.Top
 
-	x := (screenWidth - dlgWidth) / 2
-	y := (screenHeight - dlgHeight) / 2
+			x := workArea.Left + (workW-dlgW)/2
+			y := workArea.Top + (workH-dlgH)/2
 
-	// 移动窗口到居中坐标（保持原有尺寸与 Z-Order 不变）
-	win.SetWindowPos(dlg.Handle(), 0, x, y, 0, 0, win.SWP_NOSIZE|win.SWP_NOZORDER)
+			// 移动窗口并置顶
+			win.SetWindowPos(dlg.Handle(), win.HWND_TOP, x, y, 0, 0, win.SWP_NOSIZE)
+			win.SetForegroundWindow(dlg.Handle())
+		}
+	})
 
-	// 强制置顶激活
-	win.SetForegroundWindow(dlg.Handle())
 	dlg.Run()
 }
