@@ -30,18 +30,15 @@ func main() {
 		return
 	}
 
-	// 核心修复：在 Create 之后，通过 Attach 绑定事件。
-	// 同时保留必需的 CloseReasonUnknown 判断和 Synchronize 异步隐藏。
+	// ---------------- 核心修复点 ----------------
+	// 拦截右上角 X 关闭事件。walk 规定用户点击 X 的 reason 是 CloseReasonUser
 	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		// 只有用户手动点击 X (CloseReasonUnknown) 时才拦截
-		if reason == walk.CloseReasonUnknown {
-			*canceled = true
-			// 必须放在 Synchronize 中，防止阻塞底层关闭消息导致崩溃
-			mw.Synchronize(func() {
-				mw.Hide()
-			})
+		if reason == walk.CloseReasonUser {
+			*canceled = true // 阻止窗口被销毁
+			mw.Hide()        // 直接隐藏面板
 		}
 	})
+	// ------------------------------------------
 
 	// 启动时默认隐藏窗口，只留托盘
 	mw.Hide()
@@ -72,6 +69,7 @@ func main() {
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
+		// 这里触发退出，不会受到上面的 CloseReasonUser 拦截影响
 		app.Exit(0)
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
