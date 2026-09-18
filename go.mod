@@ -1,4 +1,4 @@
-module simple-walk-app
+module walk-app
 
 go 1.22
 
