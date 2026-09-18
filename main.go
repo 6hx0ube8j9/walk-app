@@ -3,9 +3,6 @@ package main
 import (
 	"log"
 	"runtime"
-
-	"github.com/tailscale/walk"
-	. "github.com/tailscale/walk/declarative"
 )
 
 //go:generate go build -ldflags="-H windowsgui -s -w" -o app_b.exe .
@@ -16,49 +13,40 @@ const (
 )
 
 func init() {
+	// 锁死主 OS 线程，保障 Win32 消息泵运转正常
 	runtime.LockOSThread()
 }
 
 func main() {
+	// 1. 单实例检查（防重复启动）
 	lock, ok := AcquireSingleInstance(MutexName, AppName)
 	if !ok {
 		return
 	}
 	defer lock.Release()
 
-	app, err := walk.InitApp()
+	// 2. 初始化核心上下文
+	app, err := NewApp()
 	if err != nil {
-		log.Fatalf("初始化 App 失败: %v", err)
+		log.Fatalf("初始化应用失败: %v", err)
 	}
 
-	var mw *walk.MainWindow
-	err = MainWindow{
-		AssignTo: &mw,
-		Title:    AppName,
-		MinSize:  Size{Width: 360, Height: 240},
-		Layout:   VBox{Margins: Margins{Top: 20, Bottom: 20, Left: 20, Right: 20}, Spacing: 12},
-		Children: []Widget{
-			Label{Text: "程序已进入后台保护运行。\n点击右上角 X 会直接隐藏到托盘。"},
-			VSpacer{Size: 10},
-			PushButton{
-				Text: "测试错误弹窗",
-				OnClicked: func() {
-					ShowErrorDialog(mw, "界面错误", "这是一条由主界面按钮触发的异常提示！")
-				},
-			},
-		},
-	}.Create()
+	// 3. 构建并挂载主窗口 GUI
+	mw, err := CreateMainWindow(app, AppName)
 	if err != nil {
-		log.Fatalf("创建窗口失败: %v", err)
+		log.Fatalf("创建主窗口失败: %v", err)
 	}
+	app.MW = mw
+	mw.Hide() // 初始静默启动到托盘
 
-	mw.Hide()
-
-	tray, err := SetupTrayManager(app, mw, AppName)
+	// 4. 构建并挂载系统托盘
+	tray, err := SetupTrayManager(app, AppName)
 	if err != nil {
 		log.Fatalf("初始化托盘失败: %v", err)
 	}
+	app.Tray = tray
 	defer tray.Exit()
 
+	// 5. 启动主消息循环
 	app.Run()
 }
