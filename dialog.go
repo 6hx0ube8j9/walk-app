@@ -26,9 +26,7 @@ func ShowErrorDialog(owner walk.Form, title, message string) {
 		Layout:        VBox{Margins: Margins{Top: 20, Bottom: 15, Left: 20, Right: 20}, Spacing: 15},
 		DefaultButton: &acceptPB,
 		Children: []Widget{
-			Label{
-				Text: message,
-			},
+			Label{Text: message},
 			VSpacer{},
 			Composite{
 				Layout: HBox{MarginsZero: true},
@@ -51,6 +49,7 @@ func ShowErrorDialog(owner walk.Form, title, message string) {
 		return
 	}
 
+	// 挂载在 Starting 钩子上：窗口尺寸测量完毕但未呈现前计算居中
 	dlg.Starting().Attach(func() {
 		if parent == nil {
 			var rect win.RECT
@@ -71,7 +70,6 @@ func ShowErrorDialog(owner walk.Form, title, message string) {
 			x := workArea.Left + (screenW-dlgW)/2
 			y := workArea.Top + (screenH-dlgH)/2
 
-			// 设置居中坐标并置顶前置
 			win.SetWindowPos(dlg.Handle(), win.HWND_TOP, x, y, 0, 0, win.SWP_NOSIZE)
 			win.SetForegroundWindow(dlg.Handle())
 		}
