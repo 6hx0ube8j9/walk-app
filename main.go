@@ -1,26 +1,13 @@
 package main
 
 import (
-	"os"
-	"os/exec"
-
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 )
 
-//go:generate go build -ldflags="-H windowsgui" -o app.exe main.go
+//go:generate go build -ldflags="-H windowsgui" -o app_b.exe main.go
 
 func main() {
-	// 区分当前是“托盘后台”还是“弹出的面板”
-	if len(os.Args) > 1 && os.Args[1] == "--panel" {
-		runPanel() // 运行面板进程
-	} else {
-		runTray()  // 运行托盘常驻进程
-	}
-}
-
-// ================= 1. 独立面板进程 =================
-func runPanel() {
 	app, err := walk.InitApp()
 	if err != nil {
 		return
@@ -28,38 +15,27 @@ func runPanel() {
 	defer app.Exit(0)
 
 	var mw *walk.MainWindow
-
-	// 创建面板窗口：自带最大化、最小化、关闭(X)按钮
 	err = (MainWindow{
 		AssignTo: &mw,
-		Title:    "独立的配置面板",
-		MinSize:  Size{Width: 350, Height: 250},
+		Title:    "流派B - 单进程显隐面板",
+		MinSize:  Size{Width: 300, Height: 200},
 		Layout:   VBox{},
 		Children: []Widget{
-			PushButton{
-				Text: "模拟面板崩溃/直接退出",
-				OnClicked: func() {
-					os.Exit(1) // 模拟面板异常退出，托盘绝对不会死！
-				},
-			},
+			Label{Text: "点击右上角 X 会自动隐藏到托盘，而不是退出程序"},
 		},
 	}).Create()
 	if err != nil {
 		return
 	}
 
-	// 这里的 X 关闭是真正的窗口销毁和进程退出
-	mw.Show()
-	app.Run()
-}
+	// 核心：拦截右上角 X 关闭事件，改为隐藏窗口
+	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		*canceled = true
+		mw.Hide()
+	})
 
-// ================= 2. 后台托盘常驻进程 =================
-func runTray() {
-	app, err := walk.InitApp()
-	if err != nil {
-		return
-	}
-	defer app.Exit(0)
+	// 启动时默认隐藏窗口，只留托盘
+	mw.Hide()
 
 	ni, err := walk.NewNotifyIcon()
 	if err != nil {
@@ -67,21 +43,24 @@ func runTray() {
 	}
 	defer ni.Dispose()
 
-	ni.SetToolTip("双进程架构：托盘常驻")
+	ni.SetToolTip("流派B - 单进程常驻")
 	ni.SetIcon(walk.IconInformation())
 
-	// 左键点击托盘：拉起一个全新的面板子进程
+	// 左键点击托盘：切换面板显隐状态
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
-			// 用自身 exe 加上 --panel 参数启动独立子进程
-			cmd := exec.Command(os.Args[0], "--panel")
-			_ = cmd.Start() 
+			if mw.Visible() {
+				mw.Hide()
+			} else {
+				mw.Show()
+				mw.SetFocus()
+			}
 		}
 	})
 
-	// 右键菜单：退出整个程序（连同托盘一起关掉）
+	// 右键菜单：真正退出程序
 	exitAction := walk.NewAction()
-	exitAction.SetText("退出主程序")
+	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
 		app.Exit(0)
 	})
