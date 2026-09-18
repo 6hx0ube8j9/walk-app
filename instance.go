@@ -16,7 +16,6 @@ type InstanceLock struct {
 	handle win.HANDLE
 }
 
-// AcquireSingleInstance 检查单实例。已运行时自动唤醒已有窗口并返回 false
 func AcquireSingleInstance(mutexName, windowTitle string) (*InstanceLock, bool) {
 	const ERROR_ALREADY_EXISTS = 183
 	namePtr, _ := syscall.UTF16PtrFromString(mutexName)
@@ -26,7 +25,7 @@ func AcquireSingleInstance(mutexName, windowTitle string) (*InstanceLock, bool) 
 		if hMutex != 0 {
 			win.CloseHandle(win.HANDLE(hMutex))
 		}
-		// 寻找原窗口并激活唤醒
+		// 激活已有实例的窗口
 		titlePtr, _ := syscall.UTF16PtrFromString(windowTitle)
 		if hwnd := win.FindWindow(nil, titlePtr); hwnd != 0 {
 			win.ShowWindow(hwnd, win.SW_RESTORE)
