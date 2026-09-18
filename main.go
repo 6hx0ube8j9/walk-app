@@ -20,26 +20,27 @@ func main() {
 			Label{Text: "点击右上角 X 会自动隐藏到托盘，绝不会退出"},
 		},
 	}.Create()
-	
+
 	if err != nil {
 		return
 	}
 
-	// ---------------- 原版 Walk 的标准拦截 ----------------
-	// 在 lxn/walk 中，拦截非常可靠，不需要乱七八糟的异步处理
+	// ================= 核心防御机制 =================
+	// 自己掌控命运：定义真实退出标志，完全不信任 walk 的 CloseReason
+	var isExiting bool
+
 	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		// CloseReasonUser 代表用户点了 X 或者按了 Alt+F4
-		if reason == walk.CloseReasonUser {
-			*canceled = true // 拦截系统销毁窗口的指令
-			mw.Hide()        // 直接隐藏
+		// 只要 isExiting 不是 true，任何人、任何操作点 X 都无法关掉它
+		if !isExiting {
+			*canceled = true // 强制拦截关闭指令
+			mw.Hide()        // 瞬间隐藏面板
 		}
 	})
-	// ----------------------------------------------------
+	// ===============================================
 
 	// 启动时默认隐藏窗口，只留托盘
 	mw.Hide()
 
-	// 核心差异：原版 walk 创建托盘必须绑定到一个窗口句柄 (mw)
 	ni, err := walk.NewNotifyIcon(mw)
 	if err != nil {
 		return
@@ -56,7 +57,6 @@ func main() {
 				mw.Hide()
 			} else {
 				mw.Show()
-				// 原版也需要借助 win API 突破 Windows 前台焦点限制
 				win.ShowWindow(mw.Handle(), win.SW_RESTORE)
 				win.SetForegroundWindow(mw.Handle())
 			}
@@ -67,14 +67,15 @@ func main() {
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
-		// 发送全局退出信号，这会打破 mw.Run() 的阻塞
-		walk.App().Exit(0)
+		// 1. 改变标志位，给 Closing 拦截器放行
+		isExiting = true 
+		
+		mw.Close() 
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
-	
+
 	ni.SetVisible(true)
 
-	// 核心差异：原版 walk 使用主窗口的 Run() 维持系统消息循环
-	// 只要 mw 没被销毁，这个循环就不会停
+	// 原版的灵魂：由 MainWindow 维持系统消息循环
 	mw.Run()
 }
