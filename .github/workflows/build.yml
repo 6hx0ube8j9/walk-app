@@ -36,8 +36,7 @@ jobs:
         go-winres make
         
         Get-ChildItem -Filter "*.syso"
-        
-        go build -ldflags="-H windowsgui -s -w" -o simple-app.exe .
+        go build -ldflags="-s -w" -o simple-app.exe .
       shell: pwsh
 
     - name: Upload Artifact
