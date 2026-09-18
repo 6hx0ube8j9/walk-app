@@ -33,12 +33,12 @@ func main() {
 			mw.Hide()        // 瞬间隐藏面板
 		}
 	})
-	// ===============================================
 
 	// 启动时默认隐藏窗口，只留托盘
 	mw.Hide()
 
-	ni, err := walk.NewNotifyIcon(mw)
+	// 修复 1：tailscale/walk 的 NewNotifyIcon 无需传参
+	ni, err := walk.NewNotifyIcon()
 	if err != nil {
 		return
 	}
@@ -63,14 +63,20 @@ func main() {
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
-		// 改变标志位，给 Closing 拦截器放行
 		isExiting = true 
 
-		mw.Close() 
+		mw.Close()
+		// 退出时向当前线程发送退出消息，终结 Win32 消息循环
+		win.PostQuitMessage(0)
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 
 	ni.SetVisible(true)
 
-	mw.Run()
+	// 修复 2：替代 mw.Run()，采用标准的 Win32 消息循环
+	var msg win.MSG
+	for win.GetMessage(&msg, 0, 0, 0) > 0 {
+		win.TranslateMessage(&msg)
+		win.DispatchMessage(&msg)
+	}
 }
