@@ -15,35 +15,41 @@ func main() {
 	}
 	defer app.Exit(0)
 
-	var root *walk.MainWindow
+	var anchor *walk.MainWindow
 	err = MainWindow{
-		AssignTo: &root,
-		Title:    "Hidden Root",
-		Visible:  false, // 核心：永远不要调用 root.Show()
+		AssignTo: &anchor,
+		Title:    "Hidden Anchor",
+		Visible:  false, // 永远不要调用它的 Show()
 	}.Create()
 	if err != nil {
 		return
 	}
 
-	var ui *walk.Dialog
-	err = Dialog{
-		AssignTo: &ui,
+	var mw *walk.MainWindow
+	err = MainWindow{
+		AssignTo: &mw,
 		Title:    "Mihomo Tray 面板",
 		MinSize:  Size{Width: 300, Height: 200},
 		Layout:   VBox{},
 		Children: []Widget{
-			Label{Text: "这次随便点右上角的 X，托盘绝对死不了！"},
+			Label{Text: "拥有最大化/最小化，点击 X 隐藏到托盘不死！"},
 		},
-	}.Create(root) // 将隐藏的 root 作为它的父窗口
+	}.Create() // 注意：这里不需要传 anchor 作为父级，让它独立
 	if err != nil {
 		return
 	}
 
-	// 3. 拦截 Dialog 的关闭事件，改为单纯的隐藏
-	ui.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
-		*canceled = true
-		ui.Hide() // Dialog 的隐藏非常安全，再也不会牵连整个程序了
+	var isExiting bool
+
+	// 3. 拦截真实界面的关闭事件
+	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		if !isExiting {
+			*canceled = true 
+			mw.Hide() // 安全隐藏。由于 anchor 还在运行，程序绝对不会退出
+		}
 	})
+
+	mw.Hide()
 
 	ni, err := walk.NewNotifyIcon()
 	if err != nil {
@@ -56,12 +62,12 @@ func main() {
 
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
-			if ui.Visible() {
-				ui.Hide()
+			if mw.Visible() {
+				mw.Hide()
 			} else {
-				ui.Show()
-				win.ShowWindow(ui.Handle(), win.SW_RESTORE)
-				win.SetForegroundWindow(ui.Handle())
+				mw.Show()
+				win.ShowWindow(mw.Handle(), win.SW_RESTORE)
+				win.SetForegroundWindow(mw.Handle())
 			}
 		}
 	})
@@ -69,12 +75,13 @@ func main() {
 	exitAction := walk.NewAction()
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
+		isExiting = true
 		ni.Dispose()
-		app.Exit(0) // 只有这里才会真正终结程序
+		app.Exit(0) // 只有通过托盘菜单退出时，才真正终结程序
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 	ni.SetVisible(true)
 
-	// 运行主循环，它会被隐藏的 root 窗口永远维持住
+	// 开始运行，底层生命周期被 anchor 牢牢锁死
 	app.Run()
 }
