@@ -6,10 +6,8 @@ import (
 	"github.com/tailscale/win"
 )
 
-//go:generate go build -ldflags="-H windowsgui" -o app_b.exe main.go
 
 func main() {
-	// 1. Tailscale 分支特有的 App 初始化
 	app, err := walk.InitApp()
 	if err != nil {
 		return
@@ -17,14 +15,13 @@ func main() {
 	defer app.Exit(0)
 
 	var mw *walk.MainWindow
-
 	err = MainWindow{
 		AssignTo: &mw,
-		Title:    "流派B - Tailscale Walk",
+		Title:    "流派B - 降维打击防闪退",
 		MinSize:  Size{Width: 300, Height: 200},
 		Layout:   VBox{},
 		Children: []Widget{
-			Label{Text: "点击右上角 X 会自动隐藏到托盘，绝不会退出"},
+			Label{Text: "点击右上角 X 会安全隐藏，绝对不崩溃"},
 		},
 	}.Create()
 
@@ -32,39 +29,37 @@ func main() {
 		return
 	}
 
-	// ================= 核心防御机制 =================
 	var isExiting bool
 
+	// ---------------- 终极防御机制 ----------------
 	mw.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
 		if !isExiting {
-			*canceled = true // 强制拦截关闭指令
+			*canceled = true 
 			
-			// 【致命细节】Tailscale 分支必须使用 Synchronize 将 UI 操作推迟到下一个安全周期
-			mw.Synchronize(func() {
-				mw.Hide()
-			})
+			win.ShowWindow(mw.Handle(), win.SW_HIDE)
 		}
 	})
-	// ===============================================
+	// ----------------------------------------------
 
-	mw.Hide()
+	// 启动时也用底层 API 隐藏
+	win.ShowWindow(mw.Handle(), win.SW_HIDE)
 
-	// 2. Tailscale 分支的托盘不需要绑定主窗口句柄
 	ni, err := walk.NewNotifyIcon()
 	if err != nil {
 		return
 	}
 	defer ni.Dispose()
 
-	ni.SetToolTip("Tailscale Walk 托盘")
+	ni.SetToolTip("Mihomo Tray 测试")
 	ni.SetIcon(walk.IconInformation())
 
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
-			if mw.Visible() {
-				mw.Hide()
+			// 判断可见性同样使用底层 API
+			if win.IsWindowVisible(mw.Handle()) {
+				win.ShowWindow(mw.Handle(), win.SW_HIDE)
 			} else {
-				mw.Show()
+				win.ShowWindow(mw.Handle(), win.SW_SHOW)
 				win.ShowWindow(mw.Handle(), win.SW_RESTORE)
 				win.SetForegroundWindow(mw.Handle())
 			}
@@ -75,15 +70,11 @@ func main() {
 	exitAction.SetText("退出程序")
 	exitAction.Triggered().Attach(func() {
 		isExiting = true 
-		ni.Dispose() // 提前销毁托盘，防止残留图标
-		
-		// 3. Tailscale 分支通过主动退出 App 来终结生命周期
+		ni.Dispose()
 		app.Exit(0)
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
-
 	ni.SetVisible(true)
 
-	// Tailscale 分支通过 app.Run() 维持消息循环
 	app.Run()
 }
