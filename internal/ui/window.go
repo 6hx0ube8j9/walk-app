@@ -71,46 +71,47 @@ type MainWindowView struct {
 	StatusLabel *walk.Label
 }
 
-// Wake 供系统托盘调用的唤醒方法（恢复最小化、置顶、获取焦点）
+// Wake 供系统托盘调用的标准唤醒显示方法
 func (v *MainWindowView) Wake() {
 	if v.Window == nil {
 		return
 	}
-	hwnd := v.Window.Handle()
-	if win.IsIconic(hwnd) {
-		win.ShowWindow(hwnd, win.SW_RESTORE)
-	}
 	if !v.Window.Visible() {
 		v.Window.Show()
 	}
-	win.SetForegroundWindow(hwnd)
+	v.Window.BringToTop()
 	v.Window.SetFocus()
 }
 
-func centerWindow(win *walk.MainWindow) {
-	if win == nil {
+// 标准 Walk 方式居中：只使用标准整数计算，无 unsafe 指针
+func centerWindow(winHandle *walk.MainWindow) {
+	if winHandle == nil {
 		return
 	}
-	monitor := walk.PrimaryMonitor()
-	workArea := monitor.WorkArea()
-	bounds := win.Bounds()
+	bounds := winHandle.Bounds()
+	screenW := int(win.GetSystemMetrics(win.SM_CXSCREEN))
+	screenH := int(win.GetSystemMetrics(win.SM_CYSCREEN))
 
-	newX := workArea.X + (workArea.Width-bounds.Width)/2
-	newY := workArea.Y + (workArea.Height-bounds.Height)/2
+	x := (screenW - bounds.Width) / 2
+	y := (screenH - bounds.Height) / 2
 
-	if newX < 0 {
-		newX = 0
+	if x < 0 {
+		x = 0
 	}
-	if newY < 0 {
-		newY = 0
+	if y < 0 {
+		y = 0
 	}
 
-	win.SetBounds(walk.Rectangle{X: newX, Y: newY, Width: bounds.Width, Height: bounds.Height})
+	winHandle.SetBounds(walk.Rectangle{
+		X:      x,
+		Y:      y,
+		Width:  bounds.Width,
+		Height: bounds.Height,
+	})
 }
 
 func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowView, error) {
 	view := &MainWindowView{
-		// 预置测试假数据，用于直接观察表格排版与渲染效果
 		Model: &ProfileModel{
 			Items: []ProfileItem{
 				{IsActive: true, Name: "示例节点订阅 - 香港", IsRemote: true, Interval: 1, LastUpdate: "2026-03-30 10:00", Path: "sub1"},
@@ -120,7 +121,6 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 		},
 	}
 
-	// 纯空壳发送：非阻塞写入通道
 	sendCmd := func(action string) {
 		if cmdCh == nil {
 			return
@@ -136,7 +136,6 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 	var btnMoveUp, btnMoveDown *walk.PushButton
 	var btnAddRemote, btnAddLocal *walk.PushButton
 
-	// 行选中与按钮禁用/启用状态联动
 	updateActionState := func() {
 		if view.TableView == nil || actionSwitch == nil {
 			return
@@ -188,7 +187,6 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 		Font:     Font{Family: "Microsoft YaHei", PointSize: 10},
 		Layout:   VBox{Margins: Margins{Left: 15, Top: 15, Right: 15, Bottom: 15}, Spacing: 10},
 		Children: []Widget{
-			// 顶部工具栏
 			Composite{
 				MinSize: Size{Height: 45},
 				MaxSize: Size{Height: 45},
@@ -211,8 +209,6 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 					},
 				},
 			},
-
-			// 中间列表与侧边按钮
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 10},
 				Children: []Widget{
@@ -296,6 +292,7 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 		return nil, err
 	}
 
+	// Walk 标准事件：点击 X 拦截关闭改为隐藏
 	view.Window.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
 		*canceled = true
 		view.Window.SetVisible(false)
