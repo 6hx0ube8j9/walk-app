@@ -33,7 +33,6 @@ jobs:
       - name: Generate Windows Resources
         shell: pwsh
         run: |
-          # 保持与落地版一致的生成方式，读取 winres.json 和 manifest
           go run github.com/tc-hib/go-winres@latest make --arch ${{ matrix.goarch }}
 
       - name: Build EXE
@@ -43,7 +42,6 @@ jobs:
           $env:GOARCH="${{ matrix.goarch }}"
           go env GOOS GOARCH CGO_ENABLED
           
-          # 【致命变量验证】：加上了 -H=windowsgui，脱离控制台子系统
           go build -ldflags="-s -w -H=windowsgui" -o simple-app.exe .
 
       - name: Upload Artifact
