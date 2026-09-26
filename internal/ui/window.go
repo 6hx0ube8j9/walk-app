@@ -259,10 +259,6 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 		view.Window.SetVisible(false)
 	})
 
-	// ==========================================
-	// 🧪 实验点：在这里加入引发截断的“两把刀”
-	// ==========================================
-	
 	// 1. 立即强制居中（未经首次尺寸缓冲）
 	centerWindow(view.Window)
 
