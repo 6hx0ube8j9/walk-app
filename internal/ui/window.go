@@ -71,7 +71,6 @@ type MainWindowView struct {
 	StatusLabel *walk.Label
 }
 
-// Wake 供系统托盘调用的标准唤醒显示方法
 func (v *MainWindowView) Wake() {
 	if v.Window == nil {
 		return
@@ -83,7 +82,6 @@ func (v *MainWindowView) Wake() {
 	v.Window.SetFocus()
 }
 
-// 标准 Walk 方式居中：只使用标准整数计算，无 unsafe 指针
 func centerWindow(winHandle *walk.MainWindow) {
 	if winHandle == nil {
 		return
@@ -188,8 +186,6 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 		Layout:   VBox{Margins: Margins{Left: 15, Top: 15, Right: 15, Bottom: 15}, Spacing: 10},
 		Children: []Widget{
 			Composite{
-				MinSize: Size{Height: 45},
-				MaxSize: Size{Height: 45},
 				Layout:  HBox{Margins: Margins{Left: 0, Top: 5, Right: 0, Bottom: 5}, Spacing: 10},
 				Children: []Widget{
 					PushButton{
@@ -203,10 +199,7 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 						OnClicked: func() { sendCmd("add_local") },
 					},
 					HSpacer{},
-					Label{
-						AssignTo: &view.StatusLabel,
-						Text:     "就绪 (GUI 骨架测试)",
-					},
+					// 已删除撑开基线的 Label 文本
 				},
 			},
 			Composite{
@@ -224,62 +217,22 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 						Model:                 view.Model,
 						OnCurrentIndexChanged: updateActionState,
 						ContextMenuItems: []MenuItem{
-							Action{
-								AssignTo:    &actionSwitch,
-								Text:        "✔️ 切换配置",
-								OnTriggered: func() { sendCmd("switch_profile") },
-							},
-							Action{
-								AssignTo:    &actionEditText,
-								Text:        "📝 打开文本",
-								OnTriggered: func() { sendCmd("edit_text") },
-							},
-							Action{
-								AssignTo:    &actionEditSub,
-								Text:        "⚙️ 编辑订阅",
-								OnTriggered: func() { sendCmd("edit_sub") },
-							},
-							Action{
-								AssignTo:    &actionUpdate,
-								Text:        "🔄 立即更新",
-								OnTriggered: func() { sendCmd("update_remote") },
-							},
+							Action{AssignTo: &actionSwitch, Text: "✔️ 切换配置", OnTriggered: func() { sendCmd("switch_profile") }},
+							Action{AssignTo: &actionEditText, Text: "📝 打开文本", OnTriggered: func() { sendCmd("edit_text") }},
+							Action{AssignTo: &actionEditSub, Text: "⚙️ 编辑订阅", OnTriggered: func() { sendCmd("edit_sub") }},
+							Action{AssignTo: &actionUpdate, Text: "🔄 立即更新", OnTriggered: func() { sendCmd("update_remote") }},
 							Separator{},
-							Action{
-								AssignTo:    &actionMoveUp,
-								Text:        "⬆️ 向上移动",
-								OnTriggered: func() { sendCmd("move_up") },
-							},
-							Action{
-								AssignTo:    &actionMoveDown,
-								Text:        "⬇️ 向下移动",
-								OnTriggered: func() { sendCmd("move_down") },
-							},
+							Action{AssignTo: &actionMoveUp, Text: "⬆️ 向上移动", OnTriggered: func() { sendCmd("move_up") }},
+							Action{AssignTo: &actionMoveDown, Text: "⬇️ 向下移动", OnTriggered: func() { sendCmd("move_down") }},
 							Separator{},
-							Action{
-								AssignTo:    &actionDelete,
-								Text:        "❌ 删除配置",
-								OnTriggered: func() { sendCmd("delete_profile") },
-							},
+							Action{AssignTo: &actionDelete, Text: "❌ 删除配置", OnTriggered: func() { sendCmd("delete_profile") }},
 						},
 					},
 					Composite{
 						Layout: VBox{MarginsZero: true, Spacing: 8},
 						Children: []Widget{
-							PushButton{
-								AssignTo:  &btnMoveUp,
-								Text:      "⬆️ 上移",
-								Enabled:   false,
-								MinSize:   Size{Width: 90},
-								OnClicked: func() { sendCmd("move_up") },
-							},
-							PushButton{
-								AssignTo:  &btnMoveDown,
-								Text:      "⬇️ 下移",
-								Enabled:   false,
-								MinSize:   Size{Width: 90},
-								OnClicked: func() { sendCmd("move_down") },
-							},
+							PushButton{AssignTo: &btnMoveUp, Text: "⬆️ 上移", Enabled: false, MinSize: Size{Width: 90}, OnClicked: func() { sendCmd("move_up") }},
+							PushButton{AssignTo: &btnMoveDown, Text: "⬇️ 下移", Enabled: false, MinSize: Size{Width: 90}, OnClicked: func() { sendCmd("move_down") }},
 							VSpacer{},
 						},
 					},
@@ -292,7 +245,6 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 		return nil, err
 	}
 
-	// Walk 标准事件：点击 X 拦截关闭改为隐藏
 	view.Window.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
 		*canceled = true
 		view.Window.SetVisible(false)
