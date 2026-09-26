@@ -117,11 +117,7 @@ func centerWindow(winHandle *walk.MainWindow) {
 func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowView, error) {
 	view := &MainWindowView{
 		Model: &ProfileModel{
-			Items: []ProfileItem{
-				{IsActive: true, Name: "示例节点订阅 - 香港", IsRemote: true, Interval: 1, LastUpdate: "2026-03-30 10:00", Path: "sub1"},
-				{IsActive: false, Name: "本地自建备用节点", IsRemote: false, Interval: 0, LastUpdate: "-", Path: "local1"},
-				{IsActive: false, Name: "团队公共订阅 - 日本", IsRemote: true, Interval: 7, LastUpdate: "2026-03-28 14:20", Path: "sub2"},
-			},
+			Items: []ProfileItem{},
 		},
 	}
 
