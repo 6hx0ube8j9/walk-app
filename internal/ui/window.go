@@ -185,6 +185,7 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 		Font:     Font{Family: "Microsoft YaHei", PointSize: 10},
 		Layout:   VBox{Margins: Margins{Left: 15, Top: 15, Right: 15, Bottom: 15}, Spacing: 10},
 		Children: []Widget{
+			// 【卸甲区域】：去掉了 MinSize 和 MaxSize 高度锁死
 			Composite{
 				Layout:  HBox{Margins: Margins{Left: 0, Top: 5, Right: 0, Bottom: 5}, Spacing: 10},
 				Children: []Widget{
@@ -199,7 +200,11 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 						OnClicked: func() { sendCmd("add_local") },
 					},
 					HSpacer{},
-					// 已删除撑开基线的 Label 文本
+					// 【防闪退补丁】：补回 Label 供 engine.go 绑定，但故意留空 Text，抽掉文字基线的物理支撑
+					Label{
+						AssignTo: &view.StatusLabel,
+						Text:     "", 
+					},
 				},
 			},
 			Composite{
