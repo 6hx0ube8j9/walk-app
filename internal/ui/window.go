@@ -1,11 +1,117 @@
 package ui
 
 import (
+	"fmt"
 	"walk-app/internal/types"
 
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
+	"github.com/tailscale/win"
 )
+
+// ProfileItem 测试用数据项结构
+type ProfileItem struct {
+	IsActive   bool
+	Name       string
+	IsRemote   bool
+	Interval   int
+	LastUpdate string
+	Path       string
+}
+
+// ProfileModel 表格数据模型
+type ProfileModel struct {
+	walk.TableModelBase
+	Items []ProfileItem
+}
+
+func (m *ProfileModel) RowCount() int {
+	return len(m.Items)
+}
+
+func (m *ProfileModel) Value(row, col int) interface{} {
+	if row < 0 || row >= len(m.Items) {
+		return ""
+	}
+	item := m.Items[row]
+	switch col {
+	case 0:
+		if item.IsActive {
+			return "使用中"
+		}
+		return ""
+	case 1:
+		return item.Name
+	case 2:
+		if item.IsRemote {
+			return "订阅配置"
+		}
+		return "本地配置"
+	case 3:
+		if !item.IsRemote {
+			return "-"
+		}
+		if item.Interval > 0 {
+			return fmt.Sprintf("%d 天", item.Interval)
+		}
+		return "停止更新"
+	case 4:
+		if !item.IsRemote {
+			return "-"
+		}
+		return item.LastUpdate
+	}
+	return ""
+}
+
+type MainWindowView struct {
+	Window      *walk.MainWindow
+	TableView   *walk.TableView
+	Model       *ProfileModel
+	StatusLabel *walk.Label
+}
+
+// 标准唤醒逻辑（包含 SW_RESTORE 配合测试按钮截断问题）
+func (v *MainWindowView) Wake() {
+	if v.Window == nil {
+		return
+	}
+	hwnd := v.Window.Handle()
+	if win.IsIconic(hwnd) {
+		win.ShowWindow(hwnd, win.SW_RESTORE)
+	}
+	if !v.Window.Visible() {
+		v.Window.Show()
+	}
+	win.SetForegroundWindow(hwnd)
+	v.Window.SetFocus()
+}
+
+func centerWindow(winHandle *walk.MainWindow) {
+	if winHandle == nil {
+		return
+	}
+	bounds := winHandle.Bounds()
+	screenW := int(win.GetSystemMetrics(win.SM_CXSCREEN))
+	screenH := int(win.GetSystemMetrics(win.SM_CYSCREEN))
+
+	x := (screenW - bounds.Width) / 2
+	y := (screenH - bounds.Height) / 2
+
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+
+	winHandle.SetBounds(walk.Rectangle{
+		X:      x,
+		Y:      y,
+		Width:  bounds.Width,
+		Height: bounds.Height,
+	})
+}
 
 // CreateMainWindow 负责创建并初始化主窗口视图
 func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowView, error) {
@@ -148,7 +254,6 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 		return nil, err
 	}
 
-	// 窗口关闭时改为隐藏
 	view.Window.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
 		*canceled = true
 		view.Window.SetVisible(false)
