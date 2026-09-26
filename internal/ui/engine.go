@@ -37,6 +37,8 @@ func NewUIEngine(
 	engine.view = view
 	view.Window.Hide()
 
+	bounds := view.Window.Bounds()
+	view.Window.SetBounds(bounds)
 	// 2. 初始化托盘 (对应 tray.go)
 	tray, err := SetupTray(engine, title)
 	if err != nil {
