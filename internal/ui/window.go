@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"syscall" // 引入 syscall 用于测试 Hook
 	"walk-app/internal/types"
 
 	"github.com/tailscale/walk"
@@ -69,9 +70,9 @@ type MainWindowView struct {
 	TableView   *walk.TableView
 	Model       *ProfileModel
 	StatusLabel *walk.Label
+	OldWndProc  uintptr // 用于测试 Hook
 }
 
-// 标准唤醒逻辑（包含 SW_RESTORE 配合测试按钮截断问题）
 func (v *MainWindowView) Wake() {
 	if v.Window == nil {
 		return
@@ -113,7 +114,6 @@ func centerWindow(winHandle *walk.MainWindow) {
 	})
 }
 
-// CreateMainWindow 负责创建并初始化主窗口视图
 func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowView, error) {
 	view := &MainWindowView{
 		Model: &ProfileModel{
@@ -259,7 +259,25 @@ func CreateMainWindow(cmdCh chan<- types.UICommand, title string) (*MainWindowVi
 		view.Window.SetVisible(false)
 	})
 
+	// ==========================================
+	// 🧪 实验点：在这里加入引发截断的“两把刀”
+	// ==========================================
+	
+	// 1. 立即强制居中（未经首次尺寸缓冲）
 	centerWindow(view.Window)
+
+	// 2. 提前挂载底层的 WndProc 消息劫持（干扰初始 WM_SIZE / 客户区重算）
+	newWndProc := syscall.NewCallback(func(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+		if msg == win.WM_CLOSE {
+			win.ShowWindow(hwnd, win.SW_HIDE)
+			return 0
+		}
+		return win.CallWindowProc(view.OldWndProc, hwnd, msg, wParam, lParam)
+	})
+	view.OldWndProc = win.SetWindowLongPtr(view.Window.Handle(), win.GWLP_WNDPROC, newWndProc)
+
+	// ==========================================
+
 	updateActionState()
 
 	return view, nil
