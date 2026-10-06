@@ -114,12 +114,10 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 		centerDialog(dlg, parent)
 	})
 
-	// 弹窗激活时将焦点给到“确定”按钮
 	dlg.Activating().Attach(func() {
 		acceptPB.SetFocus()
 	})
 
-	// Enter / Esc 均可直接关闭提示弹窗
 	dlg.KeyDown().Attach(func(key walk.Key) {
 		if key == walk.KeyReturn || key == walk.KeyEscape {
 			doClose()
@@ -155,12 +153,12 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 	}
 
 	err := Dialog{
-		AssignTo:      &dlg,
-		Title:         title,
-		MinSize:       Size{Width: 320, Height: 150},
-		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		DefaultButton: &acceptPB,
-		CancelButton:  &cancelPB,
+		AssignTo: &dlg,
+		Title:    title,
+		MinSize:  Size{Width: 320, Height: 150},
+		Layout:   VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
+		// 注意：不要在此处设置 DefaultButton，防止 Walk 外层无脑拦截回车并死锁在“是”上
+		CancelButton: &cancelPB, // 保留 CancelButton，原生处理 ESC 键
 		Children: []Widget{
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 12},
@@ -200,19 +198,26 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		centerDialog(dlg, parent)
 	})
 
-	// 1. 展现时将键盘焦点落在默认的“是”按钮上
+	// 1. 弹窗展现时，默认将物理焦点赋予“是”按钮
 	dlg.Activating().Attach(func() {
 		acceptPB.SetFocus()
 	})
 
-	// 2. 焦点在“否”上时按 Enter，执行取消逻辑
+	// 2. 焦点在“是”时按回车 -> 确认
+	acceptPB.KeyDown().Attach(func(key walk.Key) {
+		if key == walk.KeyReturn {
+			doAccept()
+		}
+	})
+
+	// 3. 焦点在“否”时按回车 -> 取消并关闭
 	cancelPB.KeyDown().Attach(func(key walk.Key) {
 		if key == walk.KeyReturn {
 			doCancel()
 		}
 	})
 
-	// 3. 弹窗全局按键分发：感知焦点所在位置
+	// 4. 弹窗全局兜底：若焦点在空白处，依据焦点归属分发回车
 	dlg.KeyDown().Attach(func(key walk.Key) {
 		switch key {
 		case walk.KeyReturn:
