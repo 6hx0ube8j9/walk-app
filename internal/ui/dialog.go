@@ -129,6 +129,7 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 }
 
 // RunQuestionDialog 自定义双按钮询问弹窗
+// RunQuestionDialog 自定义双按钮询问弹窗
 func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, soundStyle uint32) bool {
 	var dlg *walk.Dialog
 	var acceptPB, cancelPB *walk.PushButton
@@ -191,32 +192,42 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		centerDialog(dlg, parent)
 	})
 
-	// 1. 弹窗展现激活时，自动将焦点设置到“是”按钮上
+	// 1. 展现激活时，默认聚焦到“是”按钮
 	dlg.Activating().Attach(func() {
 		acceptPB.SetFocus()
 	})
 
-	// 2. 弹窗级别键盘监听：回车确认、ESC取消
+	// 2. 按钮显式处理 Enter / Space（防止某些 Windows 消息循环吞掉回车）
+	cancelPB.KeyDown().Attach(func(key walk.Key) {
+		if key == walk.KeyReturn {
+			confirmed = false
+			dlg.Cancel()
+		}
+	})
+	acceptPB.KeyDown().Attach(func(key walk.Key) {
+		if key == walk.KeyReturn {
+			confirmed = true
+			dlg.Accept()
+		}
+	})
+
+	// 3. 弹窗全局监听：根据焦点动态处理
 	dlg.KeyDown().Attach(func(key walk.Key) {
 		switch key {
 		case walk.KeyReturn:
-			confirmed = true
-			dlg.Accept()
+			// 核心修复：检查当前获得焦点的控件
+			if dlg.FocusedWidget() == cancelPB {
+				confirmed = false
+				dlg.Cancel()
+			} else {
+				confirmed = true
+				dlg.Accept()
+			}
 		case walk.KeyEscape:
 			confirmed = false
 			dlg.Cancel()
 		}
 	})
-
-	// 3. 按钮级别 ESC 监听（防止焦点停留在某个按钮上时 ESC 无法退出）
-	handleEsc := func(key walk.Key) {
-		if key == walk.KeyEscape {
-			confirmed = false
-			dlg.Cancel()
-		}
-	}
-	acceptPB.KeyDown().Attach(handleEsc)
-	cancelPB.KeyDown().Attach(handleEsc)
 
 	dlg.Run()
 	return confirmed
