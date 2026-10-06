@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"syscall"
 	"unsafe"
 
 	"github.com/tailscale/walk"
@@ -9,19 +8,10 @@ import (
 	"github.com/tailscale/win"
 )
 
-const (
-	spiGetWorkArea = 0x0030
+const spiGetWorkArea = 0x0030
 
-	// Windows 系统声音事件代码
-	mbIconHand        = 0x00000010 // 错误 / 停止音（与原生错误弹窗声音一致）
-	mbIconExclamation = 0x00000030 // 警告 / 感叹号提示音（Windows 默认有清脆提示音）
-)
-
-var (
-	procMessageBeep = syscall.NewLazyDLL("user32.dll").NewProc("MessageBeep")
-)
-
-func centerAndForeground(dlg *walk.Dialog, parent walk.Form) {
+// centerWindow 当没有可视父窗口时，自动居中并置顶
+func centerWindow(dlg *walk.Dialog, parent walk.Form) {
 	if parent != nil {
 		return
 	}
@@ -47,7 +37,18 @@ func centerAndForeground(dlg *walk.Dialog, parent walk.Form) {
 	win.SetForegroundWindow(dlg.Handle())
 }
 
-func ShowErrorDialog(owner walk.Form, title, message string) {
+// RunErrorDialog 错误提示弹窗
+func RunErrorDialog(owner walk.Form, title, message string) {
+	RunAlertDialog(owner, title, message, walk.IconError(), win.MB_ICONERROR)
+}
+
+// RunConfirmDialog 确认提示弹窗（是/否，返回是否确认）
+func RunConfirmDialog(owner walk.Form, title, message string) bool {
+	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONQUESTION)
+}
+
+// RunAlertDialog 自定义单按钮信息/错误弹窗
+func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, style uint32) {
 	var dlg *walk.Dialog
 	var acceptPB *walk.PushButton
 
@@ -64,7 +65,13 @@ func ShowErrorDialog(owner walk.Form, title, message string) {
 		DefaultButton: &acceptPB,
 		CancelButton:  &acceptPB,
 		Children: []Widget{
-			Label{Text: message},
+			Composite{
+				Layout: HBox{MarginsZero: true, Spacing: 12},
+				Children: []Widget{
+					ImageView{Image: icon, Margin: 0},
+					Label{Text: message},
+				},
+			},
 			VSpacer{},
 			Composite{
 				Layout: HBox{MarginsZero: true},
@@ -86,14 +93,14 @@ func ShowErrorDialog(owner walk.Form, title, message string) {
 	}
 
 	dlg.Starting().Attach(func() {
-		procMessageBeep.Call(uintptr(mbIconHand))
-		centerAndForeground(dlg, parent)
+		centerWindow(dlg, parent)
 	})
 
 	dlg.Run()
 }
 
-func ShowConfirmDialog(owner walk.Form, title, message string) bool {
+// RunQuestionDialog 自定义双按钮询问弹窗
+func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, style uint32) bool {
 	var dlg *walk.Dialog
 	var acceptPB, cancelPB *walk.PushButton
 	confirmed := false
@@ -111,7 +118,13 @@ func ShowConfirmDialog(owner walk.Form, title, message string) bool {
 		DefaultButton: &acceptPB,
 		CancelButton:  &cancelPB,
 		Children: []Widget{
-			Label{Text: message},
+			Composite{
+				Layout: HBox{MarginsZero: true, Spacing: 12},
+				Children: []Widget{
+					ImageView{Image: icon, Margin: 0},
+					Label{Text: message},
+				},
+			},
 			VSpacer{},
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 10},
@@ -145,9 +158,8 @@ func ShowConfirmDialog(owner walk.Form, title, message string) bool {
 	}
 
 	dlg.Starting().Attach(func() {
-		// 播放提示警告音
-		procMessageBeep.Call(uintptr(mbIconExclamation))
-		centerAndForeground(dlg, parent)
+		win.MessageBeep(style)
+		centerWindow(dlg, parent)
 	})
 
 	dlg.Run()
