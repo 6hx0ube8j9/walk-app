@@ -68,6 +68,12 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 		parent = owner
 	}
 
+	doClose := func() {
+		if dlg != nil {
+			dlg.Accept()
+		}
+	}
+
 	err := Dialog{
 		AssignTo:      &dlg,
 		Title:         title,
@@ -92,7 +98,7 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 						AssignTo:  &acceptPB,
 						Text:      "确定",
 						MinSize:   Size{Width: 70, Height: 26},
-						OnClicked: func() { dlg.Accept() },
+						OnClicked: doClose,
 					},
 				},
 			},
@@ -116,7 +122,7 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 	// Enter / Esc 均可直接关闭提示弹窗
 	dlg.KeyDown().Attach(func(key walk.Key) {
 		if key == walk.KeyReturn || key == walk.KeyEscape {
-			dlg.Accept()
+			doClose()
 		}
 	})
 
@@ -132,6 +138,20 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 	var parent walk.Form
 	if owner != nil && owner.Visible() {
 		parent = owner
+	}
+
+	doAccept := func() {
+		confirmed = true
+		if dlg != nil {
+			dlg.Accept()
+		}
+	}
+
+	doCancel := func() {
+		confirmed = false
+		if dlg != nil {
+			dlg.Cancel()
+		}
 	}
 
 	err := Dialog{
@@ -155,22 +175,16 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 				Children: []Widget{
 					HSpacer{},
 					PushButton{
-						AssignTo: &acceptPB,
-						Text:     "是",
-						MinSize:  Size{Width: 70, Height: 26},
-						OnClicked: func() {
-							confirmed = true
-							dlg.Accept()
-						},
+						AssignTo:  &acceptPB,
+						Text:      "是",
+						MinSize:   Size{Width: 70, Height: 26},
+						OnClicked: doAccept,
 					},
 					PushButton{
-						AssignTo: &cancelPB,
-						Text:     "否",
-						MinSize:  Size{Width: 70, Height: 26},
-						OnClicked: func() {
-							confirmed = false
-							dlg.Cancel()
-						},
+						AssignTo:  &cancelPB,
+						Text:      "否",
+						MinSize:   Size{Width: 70, Height: 26},
+						OnClicked: doCancel,
 					},
 				},
 			},
@@ -191,10 +205,10 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		acceptPB.SetFocus()
 	})
 
-	// 2. 焦点在“否”上时按 Enter，执行“否”
+	// 2. 焦点在“否”上时按 Enter，执行取消逻辑
 	cancelPB.KeyDown().Attach(func(key walk.Key) {
 		if key == walk.KeyReturn {
-			cancelPB.Clicked().Raise()
+			doCancel()
 		}
 	})
 
@@ -203,12 +217,12 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		switch key {
 		case walk.KeyReturn:
 			if cancelPB.Focused() {
-				cancelPB.Clicked().Raise()
+				doCancel()
 			} else {
-				acceptPB.Clicked().Raise()
+				doAccept()
 			}
 		case walk.KeyEscape:
-			cancelPB.Clicked().Raise()
+			doCancel()
 		}
 	})
 
