@@ -44,7 +44,7 @@ func ShowErrorDialog(owner walk.Form, title, message string) {
 
 // ShowConfirmDialog 确认提示弹窗（供 tray.go 调用，播放提示音，返回是否点击“是”）
 func ShowConfirmDialog(owner walk.Form, title, message string) bool {
-	// 使用 MB_ICONEXCLAMATION 触发提示音（MB_ICONQUESTION 在 Win10/11 默认静音）
+	// 使用 MB_ICONASTERISK 触发提示音（MB_ICONQUESTION 在 Win10/11 默认静音）
 	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONASTERISK)
 }
 
@@ -106,6 +106,23 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 	dlg.Starting().Attach(func() {
 		win.MessageBeep(soundStyle)
 		centerDialog(dlg, parent)
+	})
+
+	// 弹窗激活时聚焦到“确定”按钮
+	dlg.Activating().Attach(func() {
+		acceptPB.SetFocus()
+	})
+
+	// 键盘回车与ESC支持
+	dlg.KeyDown().Attach(func(key walk.Key) {
+		if key == walk.KeyReturn || key == walk.KeyEscape {
+			dlg.Accept()
+		}
+	})
+	acceptPB.KeyDown().Attach(func(key walk.Key) {
+		if key == walk.KeyEscape {
+			dlg.Accept()
+		}
 	})
 
 	dlg.Run()
@@ -173,6 +190,33 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		win.MessageBeep(soundStyle)
 		centerDialog(dlg, parent)
 	})
+
+	// 1. 弹窗展现激活时，自动将焦点设置到“是”按钮上
+	dlg.Activating().Attach(func() {
+		acceptPB.SetFocus()
+	})
+
+	// 2. 弹窗级别键盘监听：回车确认、ESC取消
+	dlg.KeyDown().Attach(func(key walk.Key) {
+		switch key {
+		case walk.KeyReturn:
+			confirmed = true
+			dlg.Accept()
+		case walk.KeyEscape:
+			confirmed = false
+			dlg.Cancel()
+		}
+	})
+
+	// 3. 按钮级别 ESC 监听（防止焦点停留在某个按钮上时 ESC 无法退出）
+	handleEsc := func(key walk.Key) {
+		if key == walk.KeyEscape {
+			confirmed = false
+			dlg.Cancel()
+		}
+	}
+	acceptPB.KeyDown().Attach(handleEsc)
+	cancelPB.KeyDown().Attach(handleEsc)
 
 	dlg.Run()
 	return confirmed
