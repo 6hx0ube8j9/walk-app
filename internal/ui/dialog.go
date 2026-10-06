@@ -45,7 +45,7 @@ func ShowErrorDialog(owner walk.Form, title, message string) {
 // ShowConfirmDialog 确认提示弹窗（供 tray.go 调用，播放提示音，返回是否点击“是”）
 func ShowConfirmDialog(owner walk.Form, title, message string) bool {
 	// 使用 MB_ICONEXCLAMATION 触发提示音（MB_ICONQUESTION 在 Win10/11 默认静音）
-	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONEXCLAMATION)
+	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONASTERISK)
 }
 
 // RunErrorDialog 别名兼容
