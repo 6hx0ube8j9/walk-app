@@ -17,6 +17,7 @@ var (
 	procUnhookWindowsHookEx = modUser32.NewProc("UnhookWindowsHookEx")
 	procCallNextHookEx      = modUser32.NewProc("CallNextHookEx")
 	procGetCurrentThreadId  = modKernel32.NewProc("GetCurrentThreadId")
+	procIsWindowVisible     = modUser32.NewProc("IsWindowVisible")
 )
 
 const (
@@ -24,6 +25,15 @@ const (
 	hcbtActivate   = 5
 	spiGetWorkArea = 0x0030
 )
+
+// isWindowVisible 判断指定句柄是否为有效且可视的窗口
+func isWindowVisible(hwnd win.HWND) bool {
+	if hwnd == 0 {
+		return false
+	}
+	ret, _, _ := procIsWindowVisible.Call(uintptr(hwnd))
+	return ret != 0
+}
 
 // resolveTarget 解析入参，提取 HWND 与 Form，兼容 walk.Form、walk.Widget 及 nil
 func resolveTarget(target interface{}) (win.HWND, walk.Form) {
@@ -62,7 +72,7 @@ func showCenteredMsgBox(target interface{}, title, message string, style walk.Ms
 			dlgH := msgBoxRect.Bottom - msgBoxRect.Top
 
 			var x, y int32
-			if targetHWND != 0 && win.IsWindow(targetHWND) && win.IsWindowVisible(targetHWND) {
+			if isWindowVisible(targetHWND) {
 				var targetRect win.RECT
 				win.GetWindowRect(targetHWND, &targetRect)
 				targetW := targetRect.Right - targetRect.Left
