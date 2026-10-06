@@ -35,20 +35,17 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 	ni.SetToolTip(toolTip)
 	ni.SetIcon(walk.IconInformation())
 
-	// 单击托盘左键：切换主窗口显隐
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
 			engine.ToggleWindow()
 		}
 	})
 
-	// 1. 显示/隐藏主界面
 	showAction := walk.NewAction()
 	showAction.SetText("显示/隐藏主界面")
 	showAction.Triggered().Attach(engine.ToggleWindow)
 	ni.ContextMenu().Actions().Add(showAction)
 
-	// 2. 数据同步动作
 	syncAction := walk.NewAction()
 	syncAction.SetText("同步数据")
 	syncAction.Triggered().Attach(func() {
@@ -58,29 +55,37 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 	})
 	ni.ContextMenu().Actions().Add(syncAction)
 
-	// 3. 确认提示按钮（弹出带提示音的 是/否 确认框）
-	confirmAction := walk.NewAction()
-	confirmAction.SetText("确认操作")
-	confirmAction.Triggered().Attach(func() {
+	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
+
+	testErrorAction := walk.NewAction()
+	testErrorAction.SetText("【测试】错误弹窗")
+	testErrorAction.Triggered().Attach(func() {
+		var parent walk.Form
+		if engine.view != nil && engine.view.Window != nil {
+			parent = engine.view.Window
+		}
+		ShowErrorDialog(parent, "系统错误", "这是一条测试错误提示信息！")
+	})
+	ni.ContextMenu().Actions().Add(testErrorAction)
+
+	testConfirmAction := walk.NewAction()
+	testConfirmAction.SetText("【测试】确认弹窗")
+	testConfirmAction.Triggered().Attach(func() {
 		var parent walk.Form
 		if engine.view != nil && engine.view.Window != nil {
 			parent = engine.view.Window
 		}
 
-		// 触发带有标准系统提示音的询问弹窗
-		if ShowConfirmDialog(parent, "操作确认", "是否确认执行此操作？") {
-			// 用户点击“是”时触发业务命令
+		if ShowConfirmDialog(parent, "操作确认", "这是一个带提示音的测试弹窗，是否确认继续？") {
 			if engine.cmdCh != nil {
-				engine.cmdCh <- types.UICommand{Action: "confirm_ok"}
+				engine.cmdCh <- types.UICommand{Action: "test_confirm_yes"}
 			}
 		}
 	})
-	ni.ContextMenu().Actions().Add(confirmAction)
+	ni.ContextMenu().Actions().Add(testConfirmAction)
 
-	// 分割线
 	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
 
-	// 4. 彻底退出
 	exitAction := walk.NewAction()
 	exitAction.SetText("彻底退出")
 	exitAction.Triggered().Attach(func() {
