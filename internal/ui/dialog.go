@@ -68,12 +68,6 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 		parent = owner
 	}
 
-	doClose := func() {
-		if dlg != nil {
-			dlg.Accept()
-		}
-	}
-
 	err := Dialog{
 		AssignTo:      &dlg,
 		Title:         title,
@@ -98,7 +92,7 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 						AssignTo:  &acceptPB,
 						Text:      "确定",
 						MinSize:   Size{Width: 70, Height: 26},
-						OnClicked: doClose,
+						OnClicked: func() { dlg.Accept() },
 					},
 				},
 			},
@@ -118,12 +112,6 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 		acceptPB.SetFocus()
 	})
 
-	dlg.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyReturn || key == walk.KeyEscape {
-			doClose()
-		}
-	})
-
 	dlg.Run()
 }
 
@@ -138,27 +126,13 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		parent = owner
 	}
 
-	doAccept := func() {
-		confirmed = true
-		if dlg != nil {
-			dlg.Accept()
-		}
-	}
-
-	doCancel := func() {
-		confirmed = false
-		if dlg != nil {
-			dlg.Cancel()
-		}
-	}
-
 	err := Dialog{
-		AssignTo: &dlg,
-		Title:    title,
-		MinSize:  Size{Width: 320, Height: 150},
-		Layout:   VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		// 注意：不要在此处设置 DefaultButton，防止 Walk 外层无脑拦截回车并死锁在“是”上
-		CancelButton: &cancelPB, // 保留 CancelButton，原生处理 ESC 键
+		AssignTo:      &dlg,
+		Title:         title,
+		MinSize:       Size{Width: 320, Height: 150},
+		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
+		DefaultButton: &acceptPB, // 初始默认确认键为“是”
+		CancelButton:  &cancelPB, // 原生 ESC 键绑定到“否”
 		Children: []Widget{
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 12},
@@ -173,16 +147,22 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 				Children: []Widget{
 					HSpacer{},
 					PushButton{
-						AssignTo:  &acceptPB,
-						Text:      "是",
-						MinSize:   Size{Width: 70, Height: 26},
-						OnClicked: doAccept,
+						AssignTo: &acceptPB,
+						Text:     "是",
+						MinSize:  Size{Width: 70, Height: 26},
+						OnClicked: func() {
+							confirmed = true
+							dlg.Accept()
+						},
 					},
 					PushButton{
-						AssignTo:  &cancelPB,
-						Text:      "否",
-						MinSize:   Size{Width: 70, Height: 26},
-						OnClicked: doCancel,
+						AssignTo: &cancelPB,
+						Text:     "否",
+						MinSize:  Size{Width: 70, Height: 26},
+						OnClicked: func() {
+							confirmed = false
+							dlg.Cancel()
+						},
 					},
 				},
 			},
@@ -198,36 +178,21 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		centerDialog(dlg, parent)
 	})
 
-	// 1. 弹窗展现时，默认将物理焦点赋予“是”按钮
+	// 1. 弹窗打开后，初始焦点赋予“是”按钮
 	dlg.Activating().Attach(func() {
 		acceptPB.SetFocus()
 	})
 
-	// 2. 焦点在“是”时按回车 -> 确认
-	acceptPB.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyReturn {
-			doAccept()
+	// 2. 核心：监听焦点变化，动态将 DefaultButton 转移给当前获得焦点的按钮
+	cancelPB.FocusedChanged().Attach(func() {
+		if cancelPB.Focused() {
+			dlg.SetDefaultButton(cancelPB)
 		}
 	})
 
-	// 3. 焦点在“否”时按回车 -> 取消并关闭
-	cancelPB.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyReturn {
-			doCancel()
-		}
-	})
-
-	// 4. 弹窗全局兜底：若焦点在空白处，依据焦点归属分发回车
-	dlg.KeyDown().Attach(func(key walk.Key) {
-		switch key {
-		case walk.KeyReturn:
-			if cancelPB.Focused() {
-				doCancel()
-			} else {
-				doAccept()
-			}
-		case walk.KeyEscape:
-			doCancel()
+	acceptPB.FocusedChanged().Attach(func() {
+		if acceptPB.Focused() {
+			dlg.SetDefaultButton(acceptPB)
 		}
 	})
 
