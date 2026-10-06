@@ -1,75 +1,34 @@
 package ui
 
 import (
-	"unsafe"
-
 	"github.com/tailscale/walk"
-	. "github.com/tailscale/walk/declarative"
-	"github.com/tailscale/win"
 )
 
-const spiGetWorkArea = 0x0030
-
-func ShowErrorDialog(owner walk.Form, title, message string) {
-	var dlg *walk.Dialog
-	var acceptPB *walk.PushButton
-
-	var parent walk.Form
+// resolveOwner 确保只在父窗口有效且可见时才作为 Owner 传入，避免弹窗被隐藏的主窗口挂起
+func resolveOwner(owner walk.Form) walk.Form {
 	if owner != nil && owner.Visible() {
-		parent = owner
+		return owner
 	}
+	return nil
+}
 
-	err := Dialog{
-		AssignTo:      &dlg,
-		Title:         title,
-		MinSize:       Size{Width: 320, Height: 150},
-		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		DefaultButton: &acceptPB,
-		Children: []Widget{
-			Label{Text: message},
-			VSpacer{},
-			Composite{
-				Layout: HBox{MarginsZero: true},
-				Children: []Widget{
-					HSpacer{},
-					PushButton{
-						AssignTo:  &acceptPB,
-						Text:      "确定",
-						MinSize:   Size{Width: 70, Height: 26},
-						OnClicked: func() { dlg.Accept() },
-					},
-				},
-			},
-		},
-	}.Create(parent)
+// ShowErrorDialog 弹出错误提示框（自带错误图标与 Windows 错误提示音）
+func ShowErrorDialog(owner walk.Form, title, message string) {
+	walk.MsgBox(
+		resolveOwner(owner),
+		title,
+		message,
+		walk.MsgBoxOK|walk.MsgBoxIconError,
+	)
+}
 
-	if err != nil {
-		return
-	}
-
-	dlg.Starting().Attach(func() {
-		if parent == nil {
-			var rect win.RECT
-			win.GetWindowRect(dlg.Handle(), &rect)
-			dlgW := rect.Right - rect.Left
-			dlgH := rect.Bottom - rect.Top
-
-			var workArea win.RECT
-			var screenW, screenH int32
-			if win.SystemParametersInfo(spiGetWorkArea, 0, unsafe.Pointer(&workArea), 0) {
-				screenW = workArea.Right - workArea.Left
-				screenH = workArea.Bottom - workArea.Top
-			} else {
-				screenW = win.GetSystemMetrics(win.SM_CXSCREEN)
-				screenH = win.GetSystemMetrics(win.SM_CYSCREEN)
-			}
-
-			x := workArea.Left + (screenW-dlgW)/2
-			y := workArea.Top + (screenH-dlgH)/2
-			win.SetWindowPos(dlg.Handle(), win.HWND_TOP, x, y, 0, 0, win.SWP_NOSIZE)
-			win.SetForegroundWindow(dlg.Handle())
-		}
-	})
-
-	dlg.Run()
+// ShowConfirmDialog 弹出“是/否”确认提示框（自带询问图标与提示音，返回是否点击“是”）
+func ShowConfirmDialog(owner walk.Form, title, message string) bool {
+	cmd := walk.MsgBox(
+		resolveOwner(owner),
+		title,
+		message,
+		walk.MsgBoxYesNo|walk.MsgBoxIconQuestion,
+	)
+	return cmd == walk.DlgCmdYes
 }
