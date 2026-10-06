@@ -42,11 +42,13 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 		}
 	})
 
+	// 1. 显示/隐藏主界面
 	showAction := walk.NewAction()
 	showAction.SetText("显示/隐藏主界面")
 	showAction.Triggered().Attach(engine.ToggleWindow)
 	ni.ContextMenu().Actions().Add(showAction)
 
+	// 2. 数据同步动作
 	syncAction := walk.NewAction()
 	syncAction.SetText("同步数据")
 	syncAction.Triggered().Attach(func() {
@@ -56,8 +58,29 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 	})
 	ni.ContextMenu().Actions().Add(syncAction)
 
+	// 3. 确认提示按钮（弹出带提示音的 是/否 确认框）
+	confirmAction := walk.NewAction()
+	confirmAction.SetText("确认操作")
+	confirmAction.Triggered().Attach(func() {
+		var parent walk.Form
+		if engine.view != nil && engine.view.Window != nil {
+			parent = engine.view.Window
+		}
+
+		// 触发带有标准系统提示音的询问弹窗
+		if ShowConfirmDialog(parent, "操作确认", "是否确认执行此操作？") {
+			// 用户点击“是”时触发业务命令
+			if engine.cmdCh != nil {
+				engine.cmdCh <- types.UICommand{Action: "confirm_ok"}
+			}
+		}
+	})
+	ni.ContextMenu().Actions().Add(confirmAction)
+
+	// 分割线
 	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
 
+	// 4. 彻底退出
 	exitAction := walk.NewAction()
 	exitAction.SetText("彻底退出")
 	exitAction.Triggered().Attach(func() {
@@ -65,7 +88,6 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
 
-	// 底层 Hook：点击窗口 X 时改为隐藏窗口
 	newWndProc := syscall.NewCallback(func(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
 		switch msg {
 		case win.WM_CLOSE:
