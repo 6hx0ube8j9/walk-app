@@ -10,7 +10,6 @@ import (
 
 const spiGetWorkArea = 0x0030
 
-// centerDialog 避免与 window.go 的 centerWindow 重名；当无可视父窗口时自动居中并置顶
 func centerDialog(dlg *walk.Dialog, parent walk.Form) {
 	if parent != nil {
 		return
@@ -37,23 +36,18 @@ func centerDialog(dlg *walk.Dialog, parent walk.Form) {
 	win.SetForegroundWindow(dlg.Handle())
 }
 
-// ShowErrorDialog 错误提示弹窗（供 presenter.go 和 tray.go 调用，播放错误音）
 func ShowErrorDialog(owner walk.Form, title, message string) {
 	RunAlertDialog(owner, title, message, walk.IconError(), win.MB_ICONERROR)
 }
 
-// ShowConfirmDialog 确认提示弹窗（供 tray.go 调用，播放提示音，返回是否点击“是”）
 func ShowConfirmDialog(owner walk.Form, title, message string) bool {
-	// 使用 MB_ICONASTERISK 触发提示音（MB_ICONQUESTION 在 Win10/11 默认静音）
 	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONASTERISK)
 }
 
-// RunErrorDialog 别名兼容
 func RunErrorDialog(owner walk.Form, title, message string) {
 	ShowErrorDialog(owner, title, message)
 }
 
-// RunConfirmDialog 别名兼容
 func RunConfirmDialog(owner walk.Form, title, message string) bool {
 	return ShowConfirmDialog(owner, title, message)
 }
@@ -73,8 +67,8 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 		Title:         title,
 		MinSize:       Size{Width: 320, Height: 150},
 		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		DefaultButton: &acceptPB, // Enter 直接关闭
-		CancelButton:  &acceptPB, // Esc 直接关闭
+		DefaultButton: &acceptPB,
+		CancelButton:  &acceptPB,
 		Children: []Widget{
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 12},
@@ -115,11 +109,14 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 	dlg.Run()
 }
 
-// RunQuestionDialog 自定义双按钮询问弹窗
+// RunQuestionDialog 自定义双按钮询问弹窗（焦点状态追踪版）
 func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, soundStyle uint32) bool {
 	var dlg *walk.Dialog
 	var acceptPB, cancelPB *walk.PushButton
 	confirmed := false
+
+	// activeFocusedPB 实时记录用户通过键盘或鼠标赋予焦点的目标控件
+	var activeFocusedPB *walk.PushButton
 
 	var parent walk.Form
 	if owner != nil && owner.Visible() {
@@ -131,8 +128,8 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		Title:         title,
 		MinSize:       Size{Width: 320, Height: 150},
 		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		DefaultButton: &acceptPB, // 默认回车路由至 acceptPB
-		CancelButton:  &cancelPB, // ESC 键原生触发取消
+		DefaultButton: &acceptPB,
+		CancelButton:  &cancelPB,
 		Children: []Widget{
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 12},
@@ -151,8 +148,8 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 						Text:     "是",
 						MinSize:  Size{Width: 70, Height: 26},
 						OnClicked: func() {
-							// 焦点检查：若通过 Tab 选中了“否”，按 Enter 时截流执行取消
-							if cancelPB != nil && (cancelPB.Focused() || win.GetFocus() == cancelPB.Handle()) {
+							// 核心逻辑：若最后一次键盘焦点记录在“否”按钮上，按 Enter 强制执行取消
+							if activeFocusedPB == cancelPB {
 								confirmed = false
 								dlg.Cancel()
 								return
@@ -184,9 +181,22 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		centerDialog(dlg, parent)
 	})
 
-	// 打开时将初始焦点给到“是”按钮
+	// 1. 弹窗显示时，将初始焦点赋予“是”并初始化追踪状态
 	dlg.Activating().Attach(func() {
 		acceptPB.SetFocus()
+		activeFocusedPB = acceptPB
+	})
+
+	// 2. 实时追踪焦点变动：在用户按 Tab 键移动焦点时立即记录，不受后续点击事件抢焦影响
+	acceptPB.FocusedChanged().Attach(func() {
+		if acceptPB.Focused() {
+			activeFocusedPB = acceptPB
+		}
+	})
+	cancelPB.FocusedChanged().Attach(func() {
+		if cancelPB.Focused() {
+			activeFocusedPB = cancelPB
+		}
 	})
 
 	dlg.Run()
