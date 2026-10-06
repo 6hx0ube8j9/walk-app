@@ -10,8 +10,8 @@ import (
 
 const spiGetWorkArea = 0x0030
 
-// centerWindow 当没有可视父窗口时，自动居中并置顶
-func centerWindow(dlg *walk.Dialog, parent walk.Form) {
+// centerDialog 避免与 window.go 的 centerWindow 重名；当无可视父窗口时自动居中并置顶
+func centerDialog(dlg *walk.Dialog, parent walk.Form) {
 	if parent != nil {
 		return
 	}
@@ -105,7 +105,7 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 
 	dlg.Starting().Attach(func() {
 		win.MessageBeep(soundStyle)
-		centerWindow(dlg, parent)
+		centerDialog(dlg, parent)
 	})
 
 	dlg.Run()
@@ -171,7 +171,7 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 
 	dlg.Starting().Attach(func() {
 		win.MessageBeep(soundStyle)
-		centerWindow(dlg, parent)
+		centerDialog(dlg, parent)
 	})
 
 	dlg.Run()
