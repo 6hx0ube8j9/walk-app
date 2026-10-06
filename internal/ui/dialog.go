@@ -37,18 +37,29 @@ func centerWindow(dlg *walk.Dialog, parent walk.Form) {
 	win.SetForegroundWindow(dlg.Handle())
 }
 
-// RunErrorDialog 错误提示弹窗
-func RunErrorDialog(owner walk.Form, title, message string) {
+// ShowErrorDialog 错误提示弹窗（供 presenter.go 和 tray.go 调用，播放错误音）
+func ShowErrorDialog(owner walk.Form, title, message string) {
 	RunAlertDialog(owner, title, message, walk.IconError(), win.MB_ICONERROR)
 }
 
-// RunConfirmDialog 确认提示弹窗（是/否，返回是否确认）
+// ShowConfirmDialog 确认提示弹窗（供 tray.go 调用，播放提示音，返回是否点击“是”）
+func ShowConfirmDialog(owner walk.Form, title, message string) bool {
+	// 使用 MB_ICONEXCLAMATION 触发提示音（MB_ICONQUESTION 在 Win10/11 默认静音）
+	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONEXCLAMATION)
+}
+
+// RunErrorDialog 别名兼容
+func RunErrorDialog(owner walk.Form, title, message string) {
+	ShowErrorDialog(owner, title, message)
+}
+
+// RunConfirmDialog 别名兼容
 func RunConfirmDialog(owner walk.Form, title, message string) bool {
-	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONQUESTION)
+	return ShowConfirmDialog(owner, title, message)
 }
 
 // RunAlertDialog 自定义单按钮信息/错误弹窗
-func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, style uint32) {
+func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, soundStyle uint32) {
 	var dlg *walk.Dialog
 	var acceptPB *walk.PushButton
 
@@ -93,6 +104,7 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sty
 	}
 
 	dlg.Starting().Attach(func() {
+		win.MessageBeep(soundStyle)
 		centerWindow(dlg, parent)
 	})
 
@@ -100,7 +112,7 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sty
 }
 
 // RunQuestionDialog 自定义双按钮询问弹窗
-func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, style uint32) bool {
+func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, soundStyle uint32) bool {
 	var dlg *walk.Dialog
 	var acceptPB, cancelPB *walk.PushButton
 	confirmed := false
@@ -158,7 +170,7 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 	}
 
 	dlg.Starting().Attach(func() {
-		win.MessageBeep(style)
+		win.MessageBeep(soundStyle)
 		centerWindow(dlg, parent)
 	})
 
