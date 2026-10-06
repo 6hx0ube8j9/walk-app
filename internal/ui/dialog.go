@@ -10,7 +10,7 @@ import (
 
 const spiGetWorkArea = 0x0030
 
-// centerDialog 避免与 window.go 的 centerWindow 重名；当无可视父窗口时自动居中并置顶
+// centerDialog 居中并置顶
 func centerDialog(dlg *walk.Dialog, parent walk.Form) {
 	if parent != nil {
 		return
@@ -37,14 +37,13 @@ func centerDialog(dlg *walk.Dialog, parent walk.Form) {
 	win.SetForegroundWindow(dlg.Handle())
 }
 
-// ShowErrorDialog 错误提示弹窗（供 presenter.go 和 tray.go 调用，播放错误音）
+// ShowErrorDialog 错误提示弹窗
 func ShowErrorDialog(owner walk.Form, title, message string) {
 	RunAlertDialog(owner, title, message, walk.IconError(), win.MB_ICONERROR)
 }
 
-// ShowConfirmDialog 确认提示弹窗（供 tray.go 调用，播放提示音，返回是否点击“是”）
+// ShowConfirmDialog 确认提示弹窗
 func ShowConfirmDialog(owner walk.Form, title, message string) bool {
-	// 使用 MB_ICONASTERISK 触发提示音（MB_ICONQUESTION 在 Win10/11 默认静音）
 	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONASTERISK)
 }
 
@@ -58,7 +57,7 @@ func RunConfirmDialog(owner walk.Form, title, message string) bool {
 	return ShowConfirmDialog(owner, title, message)
 }
 
-// RunAlertDialog 自定义单按钮信息/错误弹窗
+// RunAlertDialog 自定义单按钮信息/错误弹窗（100% 纯原生）
 func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, soundStyle uint32) {
 	var dlg *walk.Dialog
 	var acceptPB *walk.PushButton
@@ -73,8 +72,8 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 		Title:         title,
 		MinSize:       Size{Width: 320, Height: 150},
 		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		DefaultButton: &acceptPB,
-		CancelButton:  &acceptPB,
+		DefaultButton: &acceptPB, // 原生绑定：Enter 触发确定
+		CancelButton:  &acceptPB, // 原生绑定：Esc 触发确定关闭
 		Children: []Widget{
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 12},
@@ -108,28 +107,10 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 		centerDialog(dlg, parent)
 	})
 
-	// 弹窗激活时聚焦到“确定”按钮
-	dlg.Activating().Attach(func() {
-		acceptPB.SetFocus()
-	})
-
-	// 键盘回车与ESC支持
-	dlg.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyReturn || key == walk.KeyEscape {
-			dlg.Accept()
-		}
-	})
-	acceptPB.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyEscape {
-			dlg.Accept()
-		}
-	})
-
 	dlg.Run()
 }
 
-// RunQuestionDialog 自定义双按钮询问弹窗
-// RunQuestionDialog 自定义双按钮询问弹窗
+// RunQuestionDialog 自定义双按钮询问弹窗（100% 纯原生）
 func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, soundStyle uint32) bool {
 	var dlg *walk.Dialog
 	var acceptPB, cancelPB *walk.PushButton
@@ -143,92 +124,4 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 	err := Dialog{
 		AssignTo:      &dlg,
 		Title:         title,
-		MinSize:       Size{Width: 320, Height: 150},
-		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		DefaultButton: &acceptPB,
-		CancelButton:  &cancelPB,
-		Children: []Widget{
-			Composite{
-				Layout: HBox{MarginsZero: true, Spacing: 12},
-				Children: []Widget{
-					ImageView{Image: icon, Margin: 0},
-					Label{Text: message},
-				},
-			},
-			VSpacer{},
-			Composite{
-				Layout: HBox{MarginsZero: true, Spacing: 10},
-				Children: []Widget{
-					HSpacer{},
-					PushButton{
-						AssignTo: &acceptPB,
-						Text:     "是",
-						MinSize:  Size{Width: 70, Height: 26},
-						OnClicked: func() {
-							confirmed = true
-							dlg.Accept()
-						},
-					},
-					PushButton{
-						AssignTo: &cancelPB,
-						Text:     "否",
-						MinSize:  Size{Width: 70, Height: 26},
-						OnClicked: func() {
-							confirmed = false
-							dlg.Cancel()
-						},
-					},
-				},
-			},
-		},
-	}.Create(parent)
-
-	if err != nil {
-		return false
-	}
-
-	dlg.Starting().Attach(func() {
-		win.MessageBeep(soundStyle)
-		centerDialog(dlg, parent)
-	})
-
-	// 1. 展现激活时，默认聚焦到“是”按钮
-	dlg.Activating().Attach(func() {
-		acceptPB.SetFocus()
-	})
-
-	// 2. 按钮显式处理 Enter / Space（防止某些 Windows 消息循环吞掉回车）
-	cancelPB.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyReturn {
-			confirmed = false
-			dlg.Cancel()
-		}
-	})
-	acceptPB.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyReturn {
-			confirmed = true
-			dlg.Accept()
-		}
-	})
-
-	// 3. 弹窗全局监听：根据焦点动态处理
-	dlg.KeyDown().Attach(func(key walk.Key) {
-		switch key {
-		case walk.KeyReturn:
-			// 核心修复：检查当前获得焦点的控件
-			if dlg.FocusedWidget() == cancelPB {
-				confirmed = false
-				dlg.Cancel()
-			} else {
-				confirmed = true
-				dlg.Accept()
-			}
-		case walk.KeyEscape:
-			confirmed = false
-			dlg.Cancel()
-		}
-	})
-
-	dlg.Run()
-	return confirmed
-}
+		MinSize:       Size{Width: 320, Height
