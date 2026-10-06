@@ -124,4 +124,55 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 	err := Dialog{
 		AssignTo:      &dlg,
 		Title:         title,
-		MinSize:       Size{Width: 320, Height
+		MinSize:       Size{Width: 320, Height: 150},
+		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
+		DefaultButton: &acceptPB, // 原生绑定：Enter 触发“是”
+		CancelButton:  &cancelPB, // 原生绑定：Esc 触发“否”
+		Children: []Widget{
+			Composite{
+				Layout: HBox{MarginsZero: true, Spacing: 12},
+				Children: []Widget{
+					ImageView{Image: icon, Margin: 0},
+					Label{Text: message},
+				},
+			},
+			VSpacer{},
+			Composite{
+				Layout: HBox{MarginsZero: true, Spacing: 10},
+				Children: []Widget{
+					HSpacer{},
+					PushButton{
+						AssignTo: &acceptPB,
+						Text:     "是",
+						MinSize:  Size{Width: 70, Height: 26},
+						OnClicked: func() {
+							confirmed = true
+							dlg.Accept()
+						},
+					},
+					PushButton{
+						AssignTo: &cancelPB,
+						Text:     "否",
+						MinSize:  Size{Width: 70, Height: 26},
+						OnClicked: func() {
+							confirmed = false
+							dlg.Cancel()
+						},
+					},
+				},
+			},
+		},
+	}.Create(parent)
+
+	if err != nil {
+		return false
+	}
+
+	dlg.Starting().Attach(func() {
+		win.MessageBeep(soundStyle)
+		centerDialog(dlg, parent)
+	})
+
+	dlg.Run()
+	return confirmed
+}
