@@ -37,13 +37,14 @@ func centerDialog(dlg *walk.Dialog, parent walk.Form) {
 	win.SetForegroundWindow(dlg.Handle())
 }
 
-// ShowErrorDialog 错误提示弹窗
+// ShowErrorDialog 错误提示弹窗（供 presenter.go 和 tray.go 调用，播放错误音）
 func ShowErrorDialog(owner walk.Form, title, message string) {
 	RunAlertDialog(owner, title, message, walk.IconError(), win.MB_ICONERROR)
 }
 
-// ShowConfirmDialog 确认提示弹窗
+// ShowConfirmDialog 确认提示弹窗（供 tray.go 调用，播放提示音，返回是否点击“是”）
 func ShowConfirmDialog(owner walk.Form, title, message string) bool {
+	// 使用 MB_ICONASTERISK 触发提示音（MB_ICONQUESTION 在 Win10/11 默认静音）
 	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONASTERISK)
 }
 
@@ -67,18 +68,13 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 		parent = owner
 	}
 
-	doClose := func() {
-		if dlg != nil {
-			dlg.Accept()
-		}
-	}
-
 	err := Dialog{
-		AssignTo:     &dlg,
-		Title:        title,
-		MinSize:      Size{Width: 320, Height: 150},
-		Layout:       VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		CancelButton: &acceptPB, // ESC 原生关闭
+		AssignTo:      &dlg,
+		Title:         title,
+		MinSize:       Size{Width: 320, Height: 150},
+		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
+		DefaultButton: &acceptPB, // Enter 直接关闭
+		CancelButton:  &acceptPB, // Esc 直接关闭
 		Children: []Widget{
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 12},
@@ -96,7 +92,7 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 						AssignTo:  &acceptPB,
 						Text:      "确定",
 						MinSize:   Size{Width: 70, Height: 26},
-						OnClicked: doClose,
+						OnClicked: func() { dlg.Accept() },
 					},
 				},
 			},
@@ -116,12 +112,6 @@ func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, sou
 		acceptPB.SetFocus()
 	})
 
-	// 注册全局回车加速键
-	enterAction := walk.NewAction()
-	enterAction.SetShortcut(walk.Shortcut{Key: walk.KeyReturn})
-	enterAction.Triggered().Attach(doClose)
-	dlg.Actions().Add(enterAction)
-
 	dlg.Run()
 }
 
@@ -130,51 +120,19 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 	var dlg *walk.Dialog
 	var acceptPB, cancelPB *walk.PushButton
 	confirmed := false
-	closed := false
 
 	var parent walk.Form
 	if owner != nil && owner.Visible() {
 		parent = owner
 	}
 
-	doAccept := func() {
-		if closed {
-			return
-		}
-		closed = true
-		confirmed = true
-		if dlg != nil {
-			dlg.Accept()
-		}
-	}
-
-	doCancel := func() {
-		if closed {
-			return
-		}
-		closed = true
-		confirmed = false
-		if dlg != nil {
-			dlg.Cancel()
-		}
-	}
-
-	// 统一回车分发：依据底层物理焦点精准判断
-	handleEnter := func() {
-		if cancelPB != nil && (cancelPB.Focused() || win.GetFocus() == cancelPB.Handle()) {
-			doCancel()
-		} else {
-			doAccept()
-		}
-	}
-
 	err := Dialog{
-		AssignTo: &dlg,
-		Title:    title,
-		MinSize:  Size{Width: 320, Height: 150},
-		Layout:   VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		// 严禁在此处设置 DefaultButton，防止 Walk 外层消息循环无条件劫持回车
-		CancelButton: &cancelPB, // ESC 原生绑定“否”
+		AssignTo:      &dlg,
+		Title:         title,
+		MinSize:       Size{Width: 320, Height: 150},
+		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
+		DefaultButton: &acceptPB, // 让 Windows 消息循环正常接收回车事件
+		CancelButton:  &cancelPB, // ESC 键原生触发取消
 		Children: []Widget{
 			Composite{
 				Layout: HBox{MarginsZero: true, Spacing: 12},
@@ -189,16 +147,29 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 				Children: []Widget{
 					HSpacer{},
 					PushButton{
-						AssignTo:  &acceptPB,
-						Text:      "是",
-						MinSize:   Size{Width: 70, Height: 26},
-						OnClicked: doAccept,
+						AssignTo: &acceptPB,
+						Text:     "是",
+						MinSize:  Size{Width: 70, Height: 26},
+						OnClicked: func() {
+							// 核心修复：当焦点在“否”按钮上按 Enter 时，Windows 会将回车派发给 DefaultButton。
+							// 此处检查系统真实焦点；若焦点在“否”上，重定向为取消退出。
+							if cancelPB != nil && (cancelPB.Focused() || win.GetFocus() == cancelPB.Handle()) {
+								confirmed = false
+								dlg.Cancel()
+								return
+							}
+							confirmed = true
+							dlg.Accept()
+						},
 					},
 					PushButton{
-						AssignTo:  &cancelPB,
-						Text:      "否",
-						MinSize:   Size{Width: 70, Height: 26},
-						OnClicked: doCancel,
+						AssignTo: &cancelPB,
+						Text:     "否",
+						MinSize:  Size{Width: 70, Height: 26},
+						OnClicked: func() {
+							confirmed = false
+							dlg.Cancel()
+						},
 					},
 				},
 			},
@@ -214,36 +185,10 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		centerDialog(dlg, parent)
 	})
 
-	// 1. 展现时将焦点默认赋予“是”按钮
+	// 打开时将初始焦点给到“是”按钮
 	dlg.Activating().Attach(func() {
 		acceptPB.SetFocus()
 	})
 
-	// 2. 核心：通过 Walk Action 注册全局回车加速键（无论焦点在哪个子控件都能100%捕获）
-	enterAction := walk.NewAction()
-	enterAction.SetShortcut(walk.Shortcut{Key: walk.KeyReturn})
-	enterAction.Triggered().Attach(handleEnter)
-	dlg.Actions().Add(enterAction)
-
-	// 3. 多通道事件兜底
-	acceptPB.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyReturn {
-			handleEnter()
-		}
-	})
-	cancelPB.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyReturn {
-			handleEnter()
-		}
-	})
-	dlg.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyReturn {
-			handleEnter()
-		} else if key == walk.KeyEscape {
-			doCancel()
-		}
-	})
-
 	dlg.Run()
-	return confirmed
-}
+	return
