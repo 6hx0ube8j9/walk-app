@@ -131,7 +131,7 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 		Title:         title,
 		MinSize:       Size{Width: 320, Height: 150},
 		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		DefaultButton: &acceptPB, // 让 Windows 消息循环正常接收回车事件
+		DefaultButton: &acceptPB, // 默认回车路由至 acceptPB
 		CancelButton:  &cancelPB, // ESC 键原生触发取消
 		Children: []Widget{
 			Composite{
@@ -151,8 +151,7 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 						Text:     "是",
 						MinSize:  Size{Width: 70, Height: 26},
 						OnClicked: func() {
-							// 核心修复：当焦点在“否”按钮上按 Enter 时，Windows 会将回车派发给 DefaultButton。
-							// 此处检查系统真实焦点；若焦点在“否”上，重定向为取消退出。
+							// 焦点检查：若通过 Tab 选中了“否”，按 Enter 时截流执行取消
 							if cancelPB != nil && (cancelPB.Focused() || win.GetFocus() == cancelPB.Handle()) {
 								confirmed = false
 								dlg.Cancel()
@@ -191,4 +190,5 @@ func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, 
 	})
 
 	dlg.Run()
-	return
+	return confirmed
+}
