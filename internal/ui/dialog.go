@@ -1,204 +1,105 @@
 package ui
 
 import (
-	"unsafe"
+	"runtime"
+	"syscall"
 
 	"github.com/tailscale/walk"
-	. "github.com/tailscale/walk/declarative"
 	"github.com/tailscale/win"
 )
 
-const spiGetWorkArea = 0x0030
+var (
+	modUser32               = syscall.NewLazyDLL("user32.dll")
+	modKernel32             = syscall.NewLazyDLL("kernel32.dll")
+	procSetWindowsHookExW   = modUser32.NewProc("SetWindowsHookExW")
+	procUnhookWindowsHookEx = modUser32.NewProc("UnhookWindowsHookEx")
+	procCallNextHookEx      = modUser32.NewProc("CallNextHookEx")
+	procGetCurrentThreadId  = modKernel32.NewProc("GetCurrentThreadId")
+)
 
-func centerDialog(dlg *walk.Dialog, parent walk.Form) {
-	if parent != nil {
-		return
+const (
+	whCBT        = 5
+	hcbtActivate = 5
+)
+
+// showCenteredMsgBox 核心：使用 CBT 钩子将原生模态弹窗居中至指定的 target 窗口或面板控件
+func showCenteredMsgBox(target walk.Widget, title, message string, style walk.MsgBoxStyle) int {
+	// 锁定当前 OS 线程，确保 Hook 与 MessageBox 处于同一系统线程
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+
+	var hHook uintptr
+	var targetHWND win.HWND
+
+	if target != nil {
+		targetHWND = target.Handle()
 	}
 
-	var rect win.RECT
-	win.GetWindowRect(dlg.Handle(), &rect)
-	dlgW := rect.Right - rect.Left
-	dlgH := rect.Bottom - rect.Top
+	hookCallback := syscall.NewCallback(func(nCode int32, wParam uintptr, lParam uintptr) uintptr {
+		if nCode == hcbtActivate && targetHWND != 0 {
+			msgBoxHwnd := win.HWND(wParam)
 
-	var workArea win.RECT
-	var screenW, screenH int32
-	if win.SystemParametersInfo(spiGetWorkArea, 0, unsafe.Pointer(&workArea), 0) {
-		screenW = workArea.Right - workArea.Left
-		screenH = workArea.Bottom - workArea.Top
-	} else {
-		screenW = win.GetSystemMetrics(win.SM_CXSCREEN)
-		screenH = win.GetSystemMetrics(win.SM_CYSCREEN)
-	}
+			var targetRect, msgBoxRect win.RECT
+			win.GetWindowRect(targetHWND, &targetRect)
+			win.GetWindowRect(msgBoxHwnd, &msgBoxRect)
 
-	x := workArea.Left + (screenW-dlgW)/2
-	y := workArea.Top + (screenH-dlgH)/2
-	win.SetWindowPos(dlg.Handle(), win.HWND_TOP, x, y, 0, 0, win.SWP_NOSIZE)
-	win.SetForegroundWindow(dlg.Handle())
-}
+			targetW := targetRect.Right - targetRect.Left
+			targetH := targetRect.Bottom - targetRect.Top
+			dlgW := msgBoxRect.Right - msgBoxRect.Left
+			dlgH := msgBoxRect.Bottom - msgBoxRect.Top
 
-func ShowErrorDialog(owner walk.Form, title, message string) {
-	RunAlertDialog(owner, title, message, walk.IconError(), win.MB_ICONERROR)
-}
+			// 精确计算相对 target 的居中坐标
+			x := targetRect.Left + (targetW-dlgW)/2
+			y := targetRect.Top + (targetH-dlgH)/2
 
-func ShowConfirmDialog(owner walk.Form, title, message string) bool {
-	return RunQuestionDialog(owner, title, message, walk.IconQuestion(), win.MB_ICONASTERISK)
-}
+			win.SetWindowPos(msgBoxHwnd, 0, x, y, 0, 0, win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_NOACTIVATE)
 
-func RunErrorDialog(owner walk.Form, title, message string) {
-	ShowErrorDialog(owner, title, message)
-}
-
-func RunConfirmDialog(owner walk.Form, title, message string) bool {
-	return ShowConfirmDialog(owner, title, message)
-}
-
-// RunAlertDialog 自定义单按钮信息/错误弹窗
-func RunAlertDialog(owner walk.Form, title, message string, icon *walk.Icon, soundStyle uint32) {
-	var dlg *walk.Dialog
-	var acceptPB *walk.PushButton
-
-	var parent walk.Form
-	if owner != nil && owner.Visible() {
-		parent = owner
-	}
-
-	err := Dialog{
-		AssignTo:      &dlg,
-		Title:         title,
-		MinSize:       Size{Width: 320, Height: 150},
-		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		DefaultButton: &acceptPB,
-		CancelButton:  &acceptPB,
-		Children: []Widget{
-			Composite{
-				Layout: HBox{MarginsZero: true, Spacing: 12},
-				Children: []Widget{
-					ImageView{Image: icon, Margin: 0},
-					Label{Text: message},
-				},
-			},
-			VSpacer{},
-			Composite{
-				Layout: HBox{MarginsZero: true},
-				Children: []Widget{
-					HSpacer{},
-					PushButton{
-						AssignTo:  &acceptPB,
-						Text:      "确定",
-						MinSize:   Size{Width: 70, Height: 26},
-						OnClicked: func() { dlg.Accept() },
-					},
-				},
-			},
-		},
-	}.Create(parent)
-
-	if err != nil {
-		return
-	}
-
-	dlg.Starting().Attach(func() {
-		win.MessageBeep(soundStyle)
-		centerDialog(dlg, parent)
-	})
-
-	dlg.Activating().Attach(func() {
-		acceptPB.SetFocus()
-	})
-
-	dlg.Run()
-}
-
-// RunQuestionDialog 自定义双按钮询问弹窗（焦点状态追踪版）
-func RunQuestionDialog(owner walk.Form, title, message string, icon *walk.Icon, soundStyle uint32) bool {
-	var dlg *walk.Dialog
-	var acceptPB, cancelPB *walk.PushButton
-	confirmed := false
-
-	// activeFocusedPB 实时记录用户通过键盘或鼠标赋予焦点的目标控件
-	var activeFocusedPB *walk.PushButton
-
-	var parent walk.Form
-	if owner != nil && owner.Visible() {
-		parent = owner
-	}
-
-	err := Dialog{
-		AssignTo:      &dlg,
-		Title:         title,
-		MinSize:       Size{Width: 320, Height: 150},
-		Layout:        VBox{Margins: Margins{Top: 15, Bottom: 15, Left: 15, Right: 15}, Spacing: 10},
-		DefaultButton: &acceptPB,
-		CancelButton:  &cancelPB,
-		Children: []Widget{
-			Composite{
-				Layout: HBox{MarginsZero: true, Spacing: 12},
-				Children: []Widget{
-					ImageView{Image: icon, Margin: 0},
-					Label{Text: message},
-				},
-			},
-			VSpacer{},
-			Composite{
-				Layout: HBox{MarginsZero: true, Spacing: 10},
-				Children: []Widget{
-					HSpacer{},
-					PushButton{
-						AssignTo: &acceptPB,
-						Text:     "是",
-						MinSize:  Size{Width: 70, Height: 26},
-						OnClicked: func() {
-							// 核心逻辑：若最后一次键盘焦点记录在“否”按钮上，按 Enter 强制执行取消
-							if activeFocusedPB == cancelPB {
-								confirmed = false
-								dlg.Cancel()
-								return
-							}
-							confirmed = true
-							dlg.Accept()
-						},
-					},
-					PushButton{
-						AssignTo: &cancelPB,
-						Text:     "否",
-						MinSize:  Size{Width: 70, Height: 26},
-						OnClicked: func() {
-							confirmed = false
-							dlg.Cancel()
-						},
-					},
-				},
-			},
-		},
-	}.Create(parent)
-
-	if err != nil {
-		return false
-	}
-
-	dlg.Starting().Attach(func() {
-		win.MessageBeep(soundStyle)
-		centerDialog(dlg, parent)
-	})
-
-	// 1. 弹窗显示时，将初始焦点赋予“是”并初始化追踪状态
-	dlg.Activating().Attach(func() {
-		acceptPB.SetFocus()
-		activeFocusedPB = acceptPB
-	})
-
-	// 2. 实时追踪焦点变动：在用户按 Tab 键移动焦点时立即记录，不受后续点击事件抢焦影响
-	acceptPB.FocusedChanged().Attach(func() {
-		if acceptPB.Focused() {
-			activeFocusedPB = acceptPB
+			// 调整完成后立即注销钩子
+			if hHook != 0 {
+				procUnhookWindowsHookEx.Call(hHook)
+				hHook = 0
+			}
 		}
-	})
-	cancelPB.FocusedChanged().Attach(func() {
-		if cancelPB.Focused() {
-			activeFocusedPB = cancelPB
-		}
+
+		ret, _, _ := procCallNextHookEx.Call(hHook, uintptr(nCode), wParam, lParam)
+		return ret
 	})
 
-	dlg.Run()
-	return confirmed
+	tid, _, _ := procGetCurrentThreadId.Call()
+	hHook, _, _ = procSetWindowsHookExW.Call(uintptr(whCBT), hookCallback, 0, tid)
+
+	var ownerForm walk.Form
+	if target != nil {
+		ownerForm = target.Form()
+	}
+
+	// 调用原生 walk.MsgBox，具备 Windows 内核对 Tab/Enter/Esc 的原生响应支持
+	result := walk.MsgBox(ownerForm, title, message, style)
+
+	// 兜底注销
+	if hHook != 0 {
+		procUnhookWindowsHookEx.Call(hHook)
+	}
+
+	return result
+}
+
+// ShowConfirmDialog 确认提示弹窗（支持传入 MainWindow 或其子控件 TableView）
+func ShowConfirmDialog(target walk.Widget, title, message string) bool {
+	res := showCenteredMsgBox(target, title, message, walk.MsgBoxYesNo|walk.MsgBoxIconQuestion)
+	return res == win.IDYES
+}
+
+// ShowErrorDialog 错误提示弹窗
+func ShowErrorDialog(target walk.Widget, title, message string) {
+	showCenteredMsgBox(target, title, message, walk.MsgBoxOK|walk.MsgBoxIconError)
+}
+
+// 兼容别名
+func RunConfirmDialog(target walk.Widget, title, message string) bool {
+	return ShowConfirmDialog(target, title, message)
+}
+
+func RunErrorDialog(target walk.Widget, title, message string) {
+	ShowErrorDialog(target, title, message)
 }
