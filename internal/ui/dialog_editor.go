@@ -16,13 +16,14 @@ const (
 	whGetMessage = 3
 )
 
+// 使用 editor 前缀隔离，彻底避免与 dialog.go 中的同名 DLL 句柄冲突
 var (
-	modUser32               = syscall.NewLazyDLL("user32.dll")
-	modKernel32             = syscall.NewLazyDLL("kernel32.dll")
-	procSetWindowsHookExW   = modUser32.NewProc("SetWindowsHookExW")
-	procUnhookWindowsHookEx = modUser32.NewProc("UnhookWindowsHookEx")
-	procCallNextHookEx      = modUser32.NewProc("CallNextHookEx")
-	procGetCurrentThreadId  = modKernel32.NewProc("GetCurrentThreadId")
+	editorModUser32               = syscall.NewLazyDLL("user32.dll")
+	editorModKernel32             = syscall.NewLazyDLL("kernel32.dll")
+	editorProcSetWindowsHookExW   = editorModUser32.NewProc("SetWindowsHookExW")
+	editorProcUnhookWindowsHookEx = editorModUser32.NewProc("UnhookWindowsHookEx")
+	editorProcCallNextHookEx      = editorModUser32.NewProc("CallNextHookEx")
+	editorProcGetCurrentThreadId  = editorModKernel32.NewProc("GetCurrentThreadId")
 
 	globalGetMsgCallback uintptr
 	activeEditorMu       sync.Mutex
@@ -56,7 +57,7 @@ func editorGetMsgProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 			case win.VK_ESCAPE:
 				log.Println("[Editor] 按 Esc 键触发取消")
 				ctx.dlg.Cancel()
-				pMsg.Message = win.WM_NULL // 吞噬按键，防止系统重复触发
+				pMsg.Message = win.WM_NULL
 				return 0
 
 			case win.VK_RETURN:
@@ -75,7 +76,6 @@ func editorGetMsgProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 					return 0
 
 				default:
-					// 判定是否在输入框内
 					for i, hwnd := range ctx.inputHWNDs {
 						if hFocus == hwnd {
 							if ctx.isTextEdit[i] {
@@ -86,7 +86,7 @@ func editorGetMsgProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 									pMsg.Message = win.WM_NULL
 									return 0
 								}
-								// 普通 Enter：不拦截，放行让 TextEdit 正常换行！
+								// 普通 Enter：放行让 TextEdit 原生换行
 								break
 							} else {
 								// 单行输入框 (LineEdit)
@@ -131,7 +131,7 @@ func editorGetMsgProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
 	if activeEditorCtx != nil {
 		hHook = activeEditorCtx.hHook
 	}
-	ret, _, _ := procCallNextHookEx.Call(hHook, uintptr(nCode), wParam, lParam)
+	ret, _, _ := editorProcCallNextHookEx.Call(hHook, uintptr(nCode), wParam, lParam)
 	return ret
 }
 
@@ -200,7 +200,6 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		MinSize:  Size{Width: cfg.Width, Height: cfg.MinHeight},
 		Layout:   VBox{Margins: Margins{Left: 18, Top: 15, Right: 18, Bottom: 15}, Spacing: 12},
 		Children: layoutChildren,
-		// 严禁在此处绑定 DefaultButton / CancelButton，交由 WH_GETMESSAGE 完全接管
 	}.Create(owner)
 
 	if err != nil {
@@ -208,7 +207,6 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		return EditorResult{Accepted: false, Error: err}
 	}
 
-	// 收集所有输入控件
 	inputs := findInputWidgets(dlg)
 	var inputHWNDs []win.HWND
 	var isTextEdit []bool
@@ -217,7 +215,6 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		_, ok := in.(*walk.TextEdit)
 		isTextEdit = append(isTextEdit, ok)
 
-		// 为 TextEdit 打上 ES_WANTRETURN，确保原生消息接收回车
 		if ok {
 			hwnd := in.Handle()
 			style := win.GetWindowLong(hwnd, win.GWL_STYLE)
@@ -228,9 +225,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		}
 	}
 
-	// =========================================================================
 	// 挂载当前 UI 线程专用的 WH_GETMESSAGE 钩子
-	// =========================================================================
 	activeEditorMu.Lock()
 	runtime.LockOSThread()
 
@@ -243,13 +238,13 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 	}
 	activeEditorCtx = ctx
 
-	tid, _, _ := procGetCurrentThreadId.Call()
-	hHook, _, _ := procSetWindowsHookExW.Call(uintptr(whGetMessage), globalGetMsgCallback, 0, tid)
+	tid, _, _ := editorProcGetCurrentThreadId.Call()
+	hHook, _, _ := editorProcSetWindowsHookExW.Call(uintptr(whGetMessage), globalGetMsgCallback, 0, tid)
 	ctx.hHook = hHook
 
 	defer func() {
 		if ctx.hHook != 0 {
-			procUnhookWindowsHookEx.Call(ctx.hHook)
+			editorProcUnhookWindowsHookEx.Call(ctx.hHook)
 			ctx.hHook = 0
 		}
 		activeEditorCtx = nil
