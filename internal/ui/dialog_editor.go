@@ -81,6 +81,13 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		return EditorResult{Accepted: false, Error: err}
 	}
 
+	if cancelPB != nil {
+		cancelPB.KeyPress().Attach(func(key walk.Key) {
+			if key == walk.KeyReturn {
+				dlg.Cancel()
+			}
+		})
+	}
 	// 1. Esc 绑定取消
 	_ = dlg.SetCancelButton(cancelPB)
 
