@@ -50,7 +50,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 					Text:     cfg.AcceptBtnText,
 					MinSize:  Size{Width: 80, Height: 26},
 					OnClicked: func() {
-						log.Println("[原生事件] >>> 触发了【保存】按钮的 OnClicked <<<")
+						log.Println("[Editor] 鼠标点击了“保存”按钮")
 						dlg.Accept()
 					},
 				},
@@ -59,7 +59,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 					Text:     cfg.CancelBtnText,
 					MinSize:  Size{Width: 80, Height: 26},
 					OnClicked: func() {
-						log.Println("[原生事件] >>> 触发了【取消】按钮的 OnClicked <<<")
+						log.Println("[Editor] 鼠标点击了“取消”按钮")
 						dlg.Cancel()
 					},
 				},
@@ -67,26 +67,24 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		},
 	)
 
-	// 完全遵循另一位 AI 的建议：
-	// 1. 设置 DefaultButton 绑定回车确认
-	// 2. 设置 CancelButton 绑定 Esc 取消
-	// 3. 不挂载任何 Hook
-	err := Dialog{
-		AssignTo:      &dlg,
-		Title:         cfg.Title,
-		DefaultButton: &acceptPB, // 对方方案核心：回车交给默认按钮
-		CancelButton:  &cancelPB, // 对方方案核心：Esc 交给取消按钮
-		MinSize:       Size{Width: cfg.Width, Height: cfg.MinHeight},
-		Layout:        VBox{Margins: Margins{Left: 18, Top: 15, Right: 18, Bottom: 15}, Spacing: 12},
-		Children:      layoutChildren,
-	}.Create(owner)
-
-	if err != nil {
+	// 不设置 DefaultButton 与 CancelButton，完全交由 keyflow 统一调度
+	if err := (Dialog{
+		AssignTo: &dlg,
+		Title:    cfg.Title,
+		MinSize:  Size{Width: cfg.Width, Height: cfg.MinHeight},
+		Layout:   VBox{Margins: Margins{Left: 18, Top: 15, Right: 18, Bottom: 15}, Spacing: 12},
+		Children: layoutChildren,
+	}.Create(owner)); err != nil {
 		log.Printf("[Editor] 弹窗创建失败: %v", err)
 		return EditorResult{Accepted: false, Error: err}
 	}
 
-	defer dlg.Dispose()
+	// 挂载 WH_GETMESSAGE 键盘流引擎
+	cleanupKeyFlow := SetupDialogKeyFlow(dlg, acceptPB, cancelPB)
+	defer func() {
+		cleanupKeyFlow()
+		dlg.Dispose()
+	}()
 
 	if cfg.OnReady != nil {
 		cfg.OnReady(dlg)
@@ -123,7 +121,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		}
 	})
 
-	log.Printf("[Editor] 正在展示原生模式编辑窗口: %s", cfg.Title)
+	log.Printf("[Editor] 正在展示编辑窗口: %s", cfg.Title)
 	dlg.Run()
 
 	return EditorResult{Accepted: isAccepted, Error: processErr}
@@ -134,24 +132,16 @@ func OpenTestEditorDialog(owner walk.Form) EditorResult {
 	var contentTE *walk.TextEdit
 
 	cfg := EditorConfig{
-		Title:     "对方AI方案测试(无Hook)",
+		Title:     "配置内容编辑测试",
 		Width:     450,
 		MinHeight: 320,
 		Widgets: []Widget{
-			Label{Text: "配置项名称（对方方案：监听 OnKeyDown 试图拦截 Enter 跳转）："},
+			Label{Text: "配置项名称（单行框，按 Enter 跳转到下方内容框）："},
 			LineEdit{
 				AssignTo: &nameLE,
 				Text:     "测试规则项目_01",
-				// 对方方案核心：在控件上监听键盘事件
-				OnKeyDown: func(key walk.Key) {
-					log.Printf("[对方方案] LineEdit 收到按键: %v", key)
-					if key == walk.KeyReturn {
-						log.Println("[对方方案] 成功拦截到 Enter，正在转移焦点到多行框！")
-						contentTE.SetFocus()
-					}
-				},
 			},
-			Label{Text: "规则内容（多行框）："},
+			Label{Text: "规则内容（多行框，按 Enter 换行，Ctrl+Enter 保存）："},
 			TextEdit{
 				AssignTo: &contentTE,
 				Text:     "rules:\r\n  - DOMAIN-SUFFIX,google.com,Proxy\r\n  - GEOIP,CN,DIRECT",
@@ -159,7 +149,7 @@ func OpenTestEditorDialog(owner walk.Form) EditorResult {
 			},
 		},
 		OnAccept: func() (bool, error) {
-			log.Printf("[Editor-Result] 保存成功 -> 名称: %s", nameLE.Text())
+			log.Printf("[Editor-Result] 校验通过 -> 名称: %s, 内容行数: %d", nameLE.Text(), len(contentTE.Text()))
 			return true, nil
 		},
 	}
