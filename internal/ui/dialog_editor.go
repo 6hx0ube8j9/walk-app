@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"unsafe"
 
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
@@ -72,7 +73,6 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		MinSize:  Size{Width: cfg.Width, Height: cfg.MinHeight},
 		Layout:   VBox{Margins: Margins{Left: 18, Top: 15, Right: 18, Bottom: 15}, Spacing: 12},
 		Children: layoutChildren,
-		// 严禁在此处绑定 DefaultButton，避免 Walk 在顶层吞噬回车键
 	}.Create(owner)
 
 	if err != nil {
@@ -82,7 +82,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 	// 1. 设置 Esc 键原生绑定取消按钮
 	_ = dlg.SetCancelButton(cancelPB)
 
-	// 2. 解决按钮焦点回车问题：焦点在“保存”按钮上按 Enter 直接保存；在“取消”按钮按 Enter 直接取消
+	// 2. 焦点在“保存”按钮按 Enter 保存；焦点在“取消”按钮按 Enter 取消
 	acceptPB.KeyDown().Attach(func(key walk.Key) {
 		if key == walk.KeyReturn {
 			dlg.Accept()
@@ -94,11 +94,10 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		}
 	})
 
-	// 3. 递归检索窗口内的多行文本框 TextEdit
+	// 3. 多行文本框 TextEdit：注入 ES_WANTRETURN 确保 Enter 原生换行，Ctrl+Enter / Ctrl+S 快捷保存
 	textEdits := findTextEdits(dlg)
 	for _, te := range textEdits {
 		curTE := te
-		// 动态打上 Win32 ES_WANTRETURN (0x1000) 样式，确保多行框原生换行
 		hwnd := curTE.Handle()
 		style := win.GetWindowLong(hwnd, win.GWL_STYLE)
 		if style&0x1000 == 0 {
@@ -106,7 +105,6 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 			win.SetWindowPos(hwnd, 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_FRAMECHANGED)
 		}
 
-		// 在多行输入框内支持 Ctrl+Enter 或 Ctrl+S 快速保存
 		curTE.KeyDown().Attach(func(key walk.Key) {
 			if (key == walk.KeyReturn || key == walk.Key('S')) && walk.ModifiersDown() == walk.ModControl {
 				dlg.Accept()
@@ -114,7 +112,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		})
 	}
 
-	// 4. 递归检索单行文本框 LineEdit：单行框敲 Enter 直接提交保存
+	// 4. 单行输入框 LineEdit：敲 Enter 直接保存提交
 	lineEdits := findLineEdits(dlg)
 	for _, le := range lineEdits {
 		le.KeyDown().Attach(func(key walk.Key) {
@@ -145,82 +143,3 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 				ok, err := cfg.OnAccept()
 				if !ok {
 					*canceled = true
-					return
-				}
-				processErr = err
-			}
-			isAccepted = true
-		}
-
-		if !*canceled {
-			restoreFocus(owner, hActive)
-		}
-	})
-
-	dlg.Run()
-
-	return EditorResult{Accepted: isAccepted, Error: processErr}
-}
-
-// OpenTestEditorDialog 供测试菜单调用的样板窗口（含单行和多行输入框）
-func OpenTestEditorDialog(owner walk.Form) EditorResult {
-	var nameLE *walk.LineEdit
-	var contentTE *walk.TextEdit
-
-	cfg := EditorConfig{
-		Title:     "配置内容编辑测试",
-		Width:     450,
-		MinHeight: 320,
-		Widgets: []Widget{
-			Label{Text: "配置项名称（单行框，敲 Enter 触发保存）："},
-			LineEdit{
-				AssignTo: &nameLE,
-				Text:     "测试规则项目_01",
-			},
-			Label{Text: "规则内容（多行框，敲 Enter 换行，Ctrl+Enter 保存）："},
-			TextEdit{
-				AssignTo: &contentTE,
-				Text:     "rules:\r\n  - DOMAIN-SUFFIX,google.com,Proxy\r\n  - GEOIP,CN,DIRECT",
-				VScroll:  true,
-			},
-		},
-		OnAccept: func() (bool, error) {
-			fmt.Printf("[测试] 保存成功！名称: %s, 内容行数: %d\n", nameLE.Text(), len(contentTE.Text()))
-			return true, nil
-		},
-	}
-
-	return RunEditor(owner, cfg)
-}
-
-func findTextEdits(container walk.Container) []*walk.TextEdit {
-	if container == nil || container.Children() == nil {
-		return nil
-	}
-	var list []*walk.TextEdit
-	for i := 0; i < container.Children().Len(); i++ {
-		child := container.Children().At(i)
-		if te, ok := child.(*walk.TextEdit); ok {
-			list = append(list, te)
-		} else if c, ok := child.(walk.Container); ok {
-			list = append(list, findTextEdits(c)...)
-		}
-	}
-	return list
-}
-
-func findLineEdits(container walk.Container) []*walk.LineEdit {
-	if container == nil || container.Children() == nil {
-		return nil
-	}
-	var list []*walk.LineEdit
-	for i := 0; i < container.Children().Len(); i++ {
-		child := container.Children().At(i)
-		if le, ok := child.(*walk.LineEdit); ok {
-			list = append(list, le)
-		} else if c, ok := child.(walk.Container); ok {
-			list = append(list, findLineEdits(c)...)
-		}
-	}
-	return list
-}
