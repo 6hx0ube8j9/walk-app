@@ -2,6 +2,7 @@ package ui
 
 import (
 	"log"
+	"runtime"
 	"sync"
 	"syscall"
 	"unsafe"
@@ -12,59 +13,126 @@ import (
 )
 
 const (
-	wmGetDlgCode      = 0x0087
-	dlgcDefPushButton = 0x0010
-	dlgcButton        = 0x2000
+	whGetMessage = 3
 )
 
 var (
-	globalBtnSubclassCallback uintptr
-	btnOldProcMap             sync.Map // win.HWND -> uintptr
-	btnActionMap              sync.Map // win.HWND -> func()
+	modUser32               = syscall.NewLazyDLL("user32.dll")
+	modKernel32             = syscall.NewLazyDLL("kernel32.dll")
+	procSetWindowsHookExW   = modUser32.NewProc("SetWindowsHookExW")
+	procUnhookWindowsHookEx = modUser32.NewProc("UnhookWindowsHookEx")
+	procCallNextHookEx      = modUser32.NewProc("CallNextHookEx")
+	procGetCurrentThreadId  = modKernel32.NewProc("GetCurrentThreadId")
+
+	globalGetMsgCallback uintptr
+	activeEditorMu       sync.Mutex
+	activeEditorCtx      *editorHookContext
 )
 
-func init() {
-	// 全局终生仅创建 1 次回调，彻底杜绝 Go 槽位泄漏
-	globalBtnSubclassCallback = syscall.NewCallback(buttonSubclassProc)
+type editorHookContext struct {
+	hHook      uintptr
+	dlg        *walk.Dialog
+	acceptHWND win.HWND
+	cancelHWND win.HWND
+	inputHWNDs []win.HWND
+	isTextEdit []bool
 }
 
-// buttonSubclassProc 拦截按钮原生消息，精准接管回车键，杜绝焦点重入死锁
-func buttonSubclassProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
-	oldProcVal, ok := btnOldProcMap.Load(hwnd)
-	if !ok {
-		return win.DefWindowProc(hwnd, msg, wParam, lParam)
-	}
-	oldProc := oldProcVal.(uintptr)
+func init() {
+	// 全局终生仅创建 1 次回调，彻底杜绝 Go 槽位耗尽
+	globalGetMsgCallback = syscall.NewCallback(editorGetMsgProc)
+}
 
-	switch msg {
-	case wmGetDlgCode:
-		// 告诉 Windows 对话框管理器：本按钮接管回车键
-		return dlgcDefPushButton | dlgcButton
+// editorGetMsgProc 线程级消息预处理器：在 IsDialogMessage 介入前精准分流
+func editorGetMsgProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
+	if nCode >= 0 && activeEditorCtx != nil {
+		ctx := activeEditorCtx
+		pMsg := (*win.MSG)(unsafe.Pointer(lParam))
 
-	case win.WM_KEYDOWN:
-		if wParam == win.VK_RETURN {
-			if actionVal, ok := btnActionMap.Load(hwnd); ok {
-				action := actionVal.(func())
-				action()
+		if pMsg.Message == win.WM_KEYDOWN {
+			isCtrl := win.GetKeyState(win.VK_CONTROL) < 0
+
+			switch pMsg.WParam {
+			case win.VK_ESCAPE:
+				log.Println("[Editor] 按 Esc 键触发取消")
+				ctx.dlg.Cancel()
+				pMsg.Message = win.WM_NULL // 吞噬按键，防止系统重复触发
 				return 0
+
+			case win.VK_RETURN:
+				hFocus := win.GetFocus()
+				switch {
+				case hFocus == ctx.acceptHWND:
+					log.Println("[Editor] 焦点在“保存”按钮，按 Enter 触发保存")
+					ctx.dlg.Accept()
+					pMsg.Message = win.WM_NULL
+					return 0
+
+				case hFocus == ctx.cancelHWND:
+					log.Println("[Editor] 焦点在“取消”按钮，按 Enter 触发取消")
+					ctx.dlg.Cancel()
+					pMsg.Message = win.WM_NULL
+					return 0
+
+				default:
+					// 判定是否在输入框内
+					for i, hwnd := range ctx.inputHWNDs {
+						if hFocus == hwnd {
+							if ctx.isTextEdit[i] {
+								// 多行输入框 (TextEdit)
+								if isCtrl {
+									log.Println("[Editor] 多行文本框按 Ctrl+Enter -> 快捷保存")
+									ctx.dlg.Accept()
+									pMsg.Message = win.WM_NULL
+									return 0
+								}
+								// 普通 Enter：不拦截，放行让 TextEdit 正常换行！
+								break
+							} else {
+								// 单行输入框 (LineEdit)
+								if isCtrl {
+									log.Printf("[Editor] 输入框 %d 按 Ctrl+Enter -> 快捷保存", i+1)
+									ctx.dlg.Accept()
+									pMsg.Message = win.WM_NULL
+									return 0
+								}
+								// 普通 Enter：顺畅流转到下一个输入框
+								if i+1 < len(ctx.inputHWNDs) {
+									log.Printf("[Editor] 输入框 %d 按 Enter -> 光标流转至输入框 %d", i+1, i+2)
+									win.SetFocus(ctx.inputHWNDs[i+1])
+								} else {
+									log.Printf("[Editor] 末尾输入框按 Enter -> 聚焦保存按钮")
+									win.SetFocus(ctx.acceptHWND)
+								}
+								pMsg.Message = win.WM_NULL
+								return 0
+							}
+						}
+					}
+				}
+
+			case 'S':
+				if isCtrl {
+					hFocus := win.GetFocus()
+					for _, hwnd := range ctx.inputHWNDs {
+						if hFocus == hwnd {
+							log.Println("[Editor] 输入框内按 Ctrl+S -> 快捷保存")
+							ctx.dlg.Accept()
+							pMsg.Message = win.WM_NULL
+							return 0
+						}
+					}
+				}
 			}
 		}
 	}
 
-	return win.CallWindowProc(oldProc, hwnd, msg, wParam, lParam)
-}
-
-func setupButtonSubclass(hwnd win.HWND, action func()) {
-	btnActionMap.Store(hwnd, action)
-	old := win.SetWindowLongPtr(hwnd, win.GWLP_WNDPROC, globalBtnSubclassCallback)
-	btnOldProcMap.Store(hwnd, old)
-}
-
-func restoreButtonSubclass(hwnd win.HWND) {
-	if old, ok := btnOldProcMap.LoadAndDelete(hwnd); ok {
-		win.SetWindowLongPtr(hwnd, win.GWLP_WNDPROC, old.(uintptr))
+	var hHook uintptr
+	if activeEditorCtx != nil {
+		hHook = activeEditorCtx.hHook
 	}
-	btnActionMap.Delete(hwnd)
+	ret, _, _ := procCallNextHookEx.Call(hHook, uintptr(nCode), wParam, lParam)
+	return ret
 }
 
 type EditorConfig struct {
@@ -109,7 +177,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 					Text:     cfg.AcceptBtnText,
 					MinSize:  Size{Width: 80, Height: 26},
 					OnClicked: func() {
-						log.Println("[Editor] 触发“保存”动作")
+						log.Println("[Editor] 鼠标点击了“保存”按钮")
 						dlg.Accept()
 					},
 				},
@@ -118,7 +186,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 					Text:     cfg.CancelBtnText,
 					MinSize:  Size{Width: 80, Height: 26},
 					OnClicked: func() {
-						log.Println("[Editor] 触发“取消”动作")
+						log.Println("[Editor] 鼠标点击了“取消”按钮")
 						dlg.Cancel()
 					},
 				},
@@ -132,6 +200,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		MinSize:  Size{Width: cfg.Width, Height: cfg.MinHeight},
 		Layout:   VBox{Margins: Margins{Left: 18, Top: 15, Right: 18, Bottom: 15}, Spacing: 12},
 		Children: layoutChildren,
+		// 严禁在此处绑定 DefaultButton / CancelButton，交由 WH_GETMESSAGE 完全接管
 	}.Create(owner)
 
 	if err != nil {
@@ -139,58 +208,55 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		return EditorResult{Accepted: false, Error: err}
 	}
 
-	// 1. 原生 Esc 绑定全局取消
-	_ = dlg.SetCancelButton(cancelPB)
-
-	// 2. 注入底层子类化：彻底接管回车键，且绝不产生焦点重入死锁
-	setupButtonSubclass(acceptPB.Handle(), func() {
-		log.Println("[Editor] 焦点在“保存”按钮，按 Enter 触发保存")
-		dlg.Accept()
-	})
-	setupButtonSubclass(cancelPB.Handle(), func() {
-		log.Println("[Editor] 焦点在“取消”按钮，按 Enter 触发取消")
-		dlg.Cancel()
-	})
-
-	defer func() {
-		restoreButtonSubclass(acceptPB.Handle())
-		restoreButtonSubclass(cancelPB.Handle())
-		dlg.Dispose()
-	}()
-
-	// 3. 输入框回车跳转与快捷保存（纯静态绑定，无任何焦点联动副作用）
+	// 收集所有输入控件
 	inputs := findInputWidgets(dlg)
-	for i, input := range inputs {
-		idx := i
-		switch w := input.(type) {
-		case *walk.LineEdit:
-			w.KeyDown().Attach(func(key walk.Key) {
-				if key == walk.KeyReturn {
-					if walk.ModifiersDown() == walk.ModControl {
-						log.Printf("[Editor] 输入框 %d 按下 Ctrl+Enter -> 快捷保存", idx+1)
-						dlg.Accept()
-						return
-					}
-					if walk.ModifiersDown() == 0 {
-						if idx+1 < len(inputs) {
-							log.Printf("[Editor] 输入框 %d 按 Enter -> 光标流转至输入框 %d", idx+1, idx+2)
-							inputs[idx+1].SetFocus()
-						} else {
-							log.Printf("[Editor] 末尾输入框按 Enter -> 聚焦保存按钮")
-							acceptPB.SetFocus()
-						}
-					}
-				}
-			})
-		case *walk.TextEdit:
-			w.KeyDown().Attach(func(key walk.Key) {
-				if (key == walk.KeyReturn || key == walk.Key('S')) && walk.ModifiersDown() == walk.ModControl {
-					log.Println("[Editor] 多行文本框按下 Ctrl+Enter / Ctrl+S -> 快捷保存")
-					dlg.Accept()
-				}
-			})
+	var inputHWNDs []win.HWND
+	var isTextEdit []bool
+	for _, in := range inputs {
+		inputHWNDs = append(inputHWNDs, in.Handle())
+		_, ok := in.(*walk.TextEdit)
+		isTextEdit = append(isTextEdit, ok)
+
+		// 为 TextEdit 打上 ES_WANTRETURN，确保原生消息接收回车
+		if ok {
+			hwnd := in.Handle()
+			style := win.GetWindowLong(hwnd, win.GWL_STYLE)
+			if style&0x1000 == 0 {
+				win.SetWindowLong(hwnd, win.GWL_STYLE, style|0x1000)
+				win.SetWindowPos(hwnd, 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_FRAMECHANGED)
+			}
 		}
 	}
+
+	// =========================================================================
+	// 挂载当前 UI 线程专用的 WH_GETMESSAGE 钩子
+	// =========================================================================
+	activeEditorMu.Lock()
+	runtime.LockOSThread()
+
+	ctx := &editorHookContext{
+		dlg:        dlg,
+		acceptHWND: acceptPB.Handle(),
+		cancelHWND: cancelPB.Handle(),
+		inputHWNDs: inputHWNDs,
+		isTextEdit: isTextEdit,
+	}
+	activeEditorCtx = ctx
+
+	tid, _, _ := procGetCurrentThreadId.Call()
+	hHook, _, _ := procSetWindowsHookExW.Call(uintptr(whGetMessage), globalGetMsgCallback, 0, tid)
+	ctx.hHook = hHook
+
+	defer func() {
+		if ctx.hHook != 0 {
+			procUnhookWindowsHookEx.Call(ctx.hHook)
+			ctx.hHook = 0
+		}
+		activeEditorCtx = nil
+		runtime.UnlockOSThread()
+		activeEditorMu.Unlock()
+		dlg.Dispose()
+	}()
 
 	if cfg.OnReady != nil {
 		cfg.OnReady(dlg)
@@ -201,7 +267,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		centerDialog(dlg, owner, hActive)
 	})
 
-	// 4. 打开弹窗：聚焦第 1 个输入框，光标精准停在末尾（不全选）
+	// 激活时：聚焦第 1 个输入框，光标定位于文字末尾
 	dlg.Activating().Attach(func() {
 		if len(inputs) > 0 {
 			firstInput := inputs[0]
