@@ -4,51 +4,88 @@ import (
 	"github.com/tailscale/walk"
 )
 
+// CollectInputs 递归遍历容器查找所有 LineEdit 和 TextEdit 控件
+func CollectInputs(container walk.Container) []walk.Widget {
+	if container == nil || container.Children() == nil {
+		return nil
+	}
+	var list []walk.Widget
+	for i := 0; i < container.Children().Len(); i++ {
+		child := container.Children().At(i)
+		switch w := child.(type) {
+		case *walk.LineEdit, *walk.TextEdit:
+			list = append(list, w)
+		case walk.Container:
+			list = append(list, CollectInputs(w)...)
+		}
+	}
+	return list
+}
+
+// FocusFirstInput 聚焦第 1 个可用输入框并将光标定位于文字末尾
+func FocusFirstInput(inputs []walk.Widget) {
+	for _, in := range inputs {
+		if in.Visible() && in.Enabled() {
+			in.SetFocus()
+			if le, ok := in.(*walk.LineEdit); ok {
+				textLen := len([]rune(le.Text()))
+				le.SetTextSelection(textLen, textLen)
+			}
+			return
+		}
+	}
+}
+
+// SetupDialogKeyFlow 使用 100% 纯 Walk 原生事件管理键盘流
 func SetupDialogKeyFlow(dlg *walk.Dialog, acceptPB, cancelPB *walk.PushButton) func() {
 	inputs := CollectInputs(dlg)
 
-	// 1. 全局快捷键注册（Esc 退出、Ctrl+Enter 提交、Ctrl+S 提交）
+	// 1. 窗体全局快捷键（通过 ShortcutActions 注册 Esc / Ctrl+Enter / Ctrl+S）
 	escAction := walk.NewAction()
 	escAction.SetShortcut(walk.Shortcut{Key: walk.KeyEscape})
 	escAction.Triggered().Attach(func() {
 		dlg.Cancel()
 	})
-	dlg.Actions().Add(escAction)
+	dlg.ShortcutActions().Add(escAction)
 
 	submitAction := walk.NewAction()
-	submitAction.SetShortcut(walk.Shortcut{Modifiers: walk.ModCtrl, Key: walk.KeyReturn})
+	submitAction.SetShortcut(walk.Shortcut{Modifiers: walk.ModControl, Key: walk.KeyReturn})
 	submitAction.Triggered().Attach(func() {
 		dlg.Accept()
 	})
-	dlg.Actions().Add(submitAction)
+	dlg.ShortcutActions().Add(submitAction)
 
 	saveAction := walk.NewAction()
-	saveAction.SetShortcut(walk.Shortcut{Modifiers: walk.ModCtrl, Key: walk.KeyS})
+	saveAction.SetShortcut(walk.Shortcut{Modifiers: walk.ModControl, Key: walk.KeyS})
 	saveAction.Triggered().Attach(func() {
 		dlg.Accept()
 	})
-	dlg.Actions().Add(saveAction)
+	dlg.ShortcutActions().Add(saveAction)
 
-	// 2. 核心补丁：通过 FocusIn 动态调度 DefaultButton，解决 Tab 切换后 Enter 失效的问题
+	// 2. 动态调度 DefaultButton：通过 FocusedChanged 解决 Tab 切换到取消后 Enter 失效的问题
 	if cancelPB != nil {
-		cancelPB.FocusIn().Attach(func() {
-			// Tab 到取消按钮时，将其设为默认按钮，此时按 Enter 触发取消
-			dlg.SetDefaultButton(cancelPB)
+		cancelPB.FocusedChanged().Attach(func() {
+			if cancelPB.Focused() {
+				dlg.SetDefaultButton(cancelPB)
+			}
 		})
 	}
 
 	if acceptPB != nil {
-		acceptPB.FocusIn().Attach(func() {
-			// Tab 到保存按钮时，将其设为默认按钮，此时按 Enter 触发保存
-			dlg.SetDefaultButton(acceptPB)
+		acceptPB.FocusedChanged().Attach(func() {
+			if acceptPB.Focused() {
+				dlg.SetDefaultButton(acceptPB)
+			}
 		})
 	}
 
 	for i, in := range inputs {
 		idx := i
-		// 当焦点回到任何输入框时，清空默认按钮，防止多行文本框的 Enter 被按钮劫持
-		in.FocusIn().Attach(func() {
-			dlg.SetDefaultButton(nil)
+		// 当焦点进入任何输入框时，清空默认按钮，防止多行文本框的 Enter 被按钮劫持
+		in.FocusedChanged().Attach(func() {
+			if in.Focused() {
+				dlg.SetDefaultButton(nil)
+			}
 		})
 
 		if le, ok := in.(*walk.LineEdit); ok {
@@ -64,9 +101,9 @@ func SetupDialogKeyFlow(dlg *walk.Dialog, acceptPB, cancelPB *walk.PushButton) f
 		}
 	}
 
-	// 3. 激活时初始化首焦
+	// 3. 激活时初始化首焦，默认清空 DefaultButton
 	dlg.Activating().Attach(func() {
-		dlg.SetDefaultButton(nil) // 启动时默认置空，让首个输入框接管
+		dlg.SetDefaultButton(nil)
 		FocusFirstInput(inputs)
 	})
 
