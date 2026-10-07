@@ -2,138 +2,11 @@ package ui
 
 import (
 	"log"
-	"runtime"
-	"sync"
-	"syscall"
-	"unsafe"
 
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 	"github.com/tailscale/win"
 )
-
-const (
-	whGetMessage = 3
-)
-
-// 使用 editor 前缀隔离，彻底避免与 dialog.go 中的同名 DLL 句柄冲突
-var (
-	editorModUser32               = syscall.NewLazyDLL("user32.dll")
-	editorModKernel32             = syscall.NewLazyDLL("kernel32.dll")
-	editorProcSetWindowsHookExW   = editorModUser32.NewProc("SetWindowsHookExW")
-	editorProcUnhookWindowsHookEx = editorModUser32.NewProc("UnhookWindowsHookEx")
-	editorProcCallNextHookEx      = editorModUser32.NewProc("CallNextHookEx")
-	editorProcGetCurrentThreadId  = editorModKernel32.NewProc("GetCurrentThreadId")
-
-	globalGetMsgCallback uintptr
-	activeEditorMu       sync.Mutex
-	activeEditorCtx      *editorHookContext
-)
-
-type editorHookContext struct {
-	hHook      uintptr
-	dlg        *walk.Dialog
-	acceptHWND win.HWND
-	cancelHWND win.HWND
-	inputHWNDs []win.HWND
-	isTextEdit []bool
-}
-
-func init() {
-	// 全局终生仅创建 1 次回调，彻底杜绝 Go 槽位耗尽
-	globalGetMsgCallback = syscall.NewCallback(editorGetMsgProc)
-}
-
-// editorGetMsgProc 线程级消息预处理器：在 IsDialogMessage 介入前精准分流
-func editorGetMsgProc(nCode int32, wParam uintptr, lParam uintptr) uintptr {
-	if nCode >= 0 && activeEditorCtx != nil {
-		ctx := activeEditorCtx
-		pMsg := (*win.MSG)(unsafe.Pointer(lParam))
-
-		if pMsg.Message == win.WM_KEYDOWN {
-			isCtrl := win.GetKeyState(win.VK_CONTROL) < 0
-
-			switch pMsg.WParam {
-			case win.VK_ESCAPE:
-				log.Println("[Editor] 按 Esc 键触发取消")
-				ctx.dlg.Cancel()
-				pMsg.Message = win.WM_NULL
-				return 0
-
-			case win.VK_RETURN:
-				hFocus := win.GetFocus()
-				switch {
-				case hFocus == ctx.acceptHWND:
-					log.Println("[Editor] 焦点在“保存”按钮，按 Enter 触发保存")
-					ctx.dlg.Accept()
-					pMsg.Message = win.WM_NULL
-					return 0
-
-				case hFocus == ctx.cancelHWND:
-					log.Println("[Editor] 焦点在“取消”按钮，按 Enter 触发取消")
-					ctx.dlg.Cancel()
-					pMsg.Message = win.WM_NULL
-					return 0
-
-				default:
-					for i, hwnd := range ctx.inputHWNDs {
-						if hFocus == hwnd {
-							if ctx.isTextEdit[i] {
-								// 多行输入框 (TextEdit)
-								if isCtrl {
-									log.Println("[Editor] 多行文本框按 Ctrl+Enter -> 快捷保存")
-									ctx.dlg.Accept()
-									pMsg.Message = win.WM_NULL
-									return 0
-								}
-								// 普通 Enter：放行让 TextEdit 原生换行
-								break
-							} else {
-								// 单行输入框 (LineEdit)
-								if isCtrl {
-									log.Printf("[Editor] 输入框 %d 按 Ctrl+Enter -> 快捷保存", i+1)
-									ctx.dlg.Accept()
-									pMsg.Message = win.WM_NULL
-									return 0
-								}
-								// 普通 Enter：顺畅流转到下一个输入框
-								if i+1 < len(ctx.inputHWNDs) {
-									log.Printf("[Editor] 输入框 %d 按 Enter -> 光标流转至输入框 %d", i+1, i+2)
-									win.SetFocus(ctx.inputHWNDs[i+1])
-								} else {
-									log.Printf("[Editor] 末尾输入框按 Enter -> 聚焦保存按钮")
-									win.SetFocus(ctx.acceptHWND)
-								}
-								pMsg.Message = win.WM_NULL
-								return 0
-							}
-						}
-					}
-				}
-
-			case 'S':
-				if isCtrl {
-					hFocus := win.GetFocus()
-					for _, hwnd := range ctx.inputHWNDs {
-						if hFocus == hwnd {
-							log.Println("[Editor] 输入框内按 Ctrl+S -> 快捷保存")
-							ctx.dlg.Accept()
-							pMsg.Message = win.WM_NULL
-							return 0
-						}
-					}
-				}
-			}
-		}
-	}
-
-	var hHook uintptr
-	if activeEditorCtx != nil {
-		hHook = activeEditorCtx.hHook
-	}
-	ret, _, _ := editorProcCallNextHookEx.Call(hHook, uintptr(nCode), wParam, lParam)
-	return ret
-}
 
 type EditorConfig struct {
 	Title         string
@@ -207,49 +80,10 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		return EditorResult{Accepted: false, Error: err}
 	}
 
-	inputs := findInputWidgets(dlg)
-	var inputHWNDs []win.HWND
-	var isTextEdit []bool
-	for _, in := range inputs {
-		inputHWNDs = append(inputHWNDs, in.Handle())
-		_, ok := in.(*walk.TextEdit)
-		isTextEdit = append(isTextEdit, ok)
-
-		if ok {
-			hwnd := in.Handle()
-			style := win.GetWindowLong(hwnd, win.GWL_STYLE)
-			if style&0x1000 == 0 {
-				win.SetWindowLong(hwnd, win.GWL_STYLE, style|0x1000)
-				win.SetWindowPos(hwnd, 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_FRAMECHANGED)
-			}
-		}
-	}
-
-	// 挂载当前 UI 线程专用的 WH_GETMESSAGE 钩子
-	activeEditorMu.Lock()
-	runtime.LockOSThread()
-
-	ctx := &editorHookContext{
-		dlg:        dlg,
-		acceptHWND: acceptPB.Handle(),
-		cancelHWND: cancelPB.Handle(),
-		inputHWNDs: inputHWNDs,
-		isTextEdit: isTextEdit,
-	}
-	activeEditorCtx = ctx
-
-	tid, _, _ := editorProcGetCurrentThreadId.Call()
-	hHook, _, _ := editorProcSetWindowsHookExW.Call(uintptr(whGetMessage), globalGetMsgCallback, 0, tid)
-	ctx.hHook = hHook
-
+	// 挂载独立解耦的键盘流引擎（接管 Enter、Ctrl+Enter、Esc 与光标首焦）
+	cleanupKeyFlow := SetupDialogKeyFlow(dlg, acceptPB, cancelPB)
 	defer func() {
-		if ctx.hHook != 0 {
-			editorProcUnhookWindowsHookEx.Call(ctx.hHook)
-			ctx.hHook = 0
-		}
-		activeEditorCtx = nil
-		runtime.UnlockOSThread()
-		activeEditorMu.Unlock()
+		cleanupKeyFlow()
 		dlg.Dispose()
 	}()
 
@@ -260,20 +94,6 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 	dlg.Starting().Attach(func() {
 		lockWindowSize(dlg.Handle())
 		centerDialog(dlg, owner, hActive)
-	})
-
-	// 激活时：聚焦第 1 个输入框，光标定位于文字末尾
-	dlg.Activating().Attach(func() {
-		if len(inputs) > 0 {
-			firstInput := inputs[0]
-			firstInput.SetFocus()
-
-			if le, ok := firstInput.(*walk.LineEdit); ok {
-				textLen := len([]rune(le.Text()))
-				le.SetTextSelection(textLen, textLen)
-				log.Printf("[Editor] 弹窗展示，默认聚焦第 1 个输入框，光标定位于文字末尾 (下标: %d)", textLen)
-			}
-		}
 	})
 
 	dlg.SizeChanged().Attach(func() {
@@ -336,98 +156,4 @@ func OpenTestEditorDialog(owner walk.Form) EditorResult {
 	}
 
 	return RunEditor(owner, cfg)
-}
-
-func findInputWidgets(container walk.Container) []walk.Widget {
-	if container == nil || container.Children() == nil {
-		return nil
-	}
-	var list []walk.Widget
-	for i := 0; i < container.Children().Len(); i++ {
-		child := container.Children().At(i)
-		switch w := child.(type) {
-		case *walk.LineEdit, *walk.TextEdit:
-			list = append(list, w)
-		case walk.Container:
-			list = append(list, findInputWidgets(w)...)
-		}
-	}
-	return list
-}
-
-func lockWindowSize(hwnd win.HWND) {
-	style := win.GetWindowLong(hwnd, win.GWL_STYLE)
-	style &^= win.WS_THICKFRAME | win.WS_MAXIMIZEBOX
-	win.SetWindowLong(hwnd, win.GWL_STYLE, style)
-	win.SetWindowPos(hwnd, 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_FRAMECHANGED)
-}
-
-func centerDialog(dlg *walk.Dialog, owner walk.Form, hActive win.HWND) {
-	if dlg == nil {
-		return
-	}
-
-	var dRect win.RECT
-	win.GetWindowRect(dlg.Handle(), &dRect)
-	dlgW := dRect.Right - dRect.Left
-	dlgH := dRect.Bottom - dRect.Top
-
-	var dcRect win.RECT
-	win.GetClientRect(dlg.Handle(), &dcRect)
-	dPtLT := win.POINT{X: 0, Y: 0}
-	win.ClientToScreen(dlg.Handle(), &dPtLT)
-
-	dcOffsetCX := (dPtLT.X - dRect.Left) + dcRect.Right/2
-	dcOffsetCY := (dPtLT.Y - dRect.Top) + dcRect.Bottom/2
-
-	var workArea win.RECT
-	win.SystemParametersInfo(0x0030, 0, unsafe.Pointer(&workArea), 0)
-
-	var x, y int32
-	shouldFollowOwner := owner != nil && owner.Visible() && !win.IsIconic(owner.Handle())
-
-	if shouldFollowOwner && hActive != 0 && hActive != owner.Handle() {
-		shouldFollowOwner = false
-	}
-
-	if shouldFollowOwner {
-		var pClientRect win.RECT
-		win.GetClientRect(owner.Handle(), &pClientRect)
-
-		ptLT := win.POINT{X: 0, Y: 0}
-		win.ClientToScreen(owner.Handle(), &ptLT)
-
-		pCX := ptLT.X + pClientRect.Right/2
-		pCY := ptLT.Y + pClientRect.Bottom/2
-
-		x = pCX - dcOffsetCX
-		y = pCY - dcOffsetCY
-	} else {
-		x = workArea.Left + (workArea.Right-workArea.Left-dlgW)/2
-		y = workArea.Top + (workArea.Bottom-workArea.Top-dlgH)/2
-	}
-
-	if x < workArea.Left {
-		x = workArea.Left
-	} else if x+dlgW > workArea.Right {
-		x = workArea.Right - dlgW
-	}
-
-	if y < workArea.Top {
-		y = workArea.Top
-	} else if y+dlgH > workArea.Bottom {
-		y = workArea.Bottom - dlgH
-	}
-
-	win.SetWindowPos(dlg.Handle(), win.HWND_TOP, x, y, 0, 0, win.SWP_NOSIZE)
-}
-
-func restoreFocus(parent walk.Form, hActive win.HWND) {
-	if parent != nil && parent.Visible() && !win.IsIconic(parent.Handle()) {
-		win.SetForegroundWindow(parent.Handle())
-		win.SetFocus(parent.Handle())
-	} else if hActive != 0 && !win.IsIconic(hActive) {
-		win.SetForegroundWindow(hActive)
-		win.SetFocus(hActive)
-	}
 }
