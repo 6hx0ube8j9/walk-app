@@ -57,6 +57,10 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 
 	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
 
+	// -------------------------------------------------------------------------
+	// 测试动作菜单组
+	// -------------------------------------------------------------------------
+
 	testErrorAction := walk.NewAction()
 	testErrorAction.SetText("【测试】错误弹窗")
 	testErrorAction.Triggered().Attach(func() {
@@ -83,6 +87,20 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 		}
 	})
 	ni.ContextMenu().Actions().Add(testConfirmAction)
+
+	// 新增：测试多行编辑 Dialog 弹窗
+	testEditorAction := walk.NewAction()
+	testEditorAction.SetText("【测试】编辑弹窗")
+	testEditorAction.Triggered().Attach(func() {
+		var parent walk.Form
+		if engine.view != nil && engine.view.Window != nil {
+			parent = engine.view.Window
+		}
+		OpenTestEditorDialog(parent)
+	})
+	ni.ContextMenu().Actions().Add(testEditorAction)
+
+	// -------------------------------------------------------------------------
 
 	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
 
@@ -115,7 +133,7 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 	})
 
 	if engine.view != nil && engine.view.Window != nil {
-		tm.oldWndProc = win.SetWindowLongPtr(engine.view.Window.Handle(), win.GWLP_WNDPROC, newWndProc)
+		tm.oldWndProc = win.SetWindowLongPtr(engine.view.Window.Handle(), win.GWL_STYLE, newWndProc)
 	}
 
 	if err := ni.SetVisible(true); err != nil {
