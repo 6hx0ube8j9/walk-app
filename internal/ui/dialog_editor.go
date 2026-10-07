@@ -2,12 +2,70 @@ package ui
 
 import (
 	"log"
+	"sync"
+	"syscall"
 	"unsafe"
 
 	"github.com/tailscale/walk"
 	. "github.com/tailscale/walk/declarative"
 	"github.com/tailscale/win"
 )
+
+const (
+	wmGetDlgCode      = 0x0087
+	dlgcDefPushButton = 0x0010
+	dlgcButton        = 0x2000
+)
+
+var (
+	globalBtnSubclassCallback uintptr
+	btnOldProcMap             sync.Map // win.HWND -> uintptr
+	btnActionMap              sync.Map // win.HWND -> func()
+)
+
+func init() {
+	// 全局终生仅创建 1 次回调，彻底杜绝 Go 槽位泄漏
+	globalBtnSubclassCallback = syscall.NewCallback(buttonSubclassProc)
+}
+
+// buttonSubclassProc 拦截按钮原生消息，精准接管回车键，杜绝焦点重入死锁
+func buttonSubclassProc(hwnd win.HWND, msg uint32, wParam, lParam uintptr) uintptr {
+	oldProcVal, ok := btnOldProcMap.Load(hwnd)
+	if !ok {
+		return win.DefWindowProc(hwnd, msg, wParam, lParam)
+	}
+	oldProc := oldProcVal.(uintptr)
+
+	switch msg {
+	case wmGetDlgCode:
+		// 告诉 Windows 对话框管理器：本按钮接管回车键
+		return dlgcDefPushButton | dlgcButton
+
+	case win.WM_KEYDOWN:
+		if wParam == win.VK_RETURN {
+			if actionVal, ok := btnActionMap.Load(hwnd); ok {
+				action := actionVal.(func())
+				action()
+				return 0
+			}
+		}
+	}
+
+	return win.CallWindowProc(oldProc, hwnd, msg, wParam, lParam)
+}
+
+func setupButtonSubclass(hwnd win.HWND, action func()) {
+	btnActionMap.Store(hwnd, action)
+	old := win.SetWindowLongPtr(hwnd, win.GWLP_WNDPROC, globalBtnSubclassCallback)
+	btnOldProcMap.Store(hwnd, old)
+}
+
+func restoreButtonSubclass(hwnd win.HWND) {
+	if old, ok := btnOldProcMap.LoadAndDelete(hwnd); ok {
+		win.SetWindowLongPtr(hwnd, win.GWLP_WNDPROC, old.(uintptr))
+	}
+	btnActionMap.Delete(hwnd)
+}
 
 type EditorConfig struct {
 	Title         string
@@ -81,58 +139,29 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		return EditorResult{Accepted: false, Error: err}
 	}
 
-	inputs := findInputWidgets(dlg)
-
-	// =========================================================================
-	// 【核心修复】：解决 Walk 的 Default/CancelButton 互斥冲突
-	// =========================================================================
-	updateButtonRoles := func() {
-		switch {
-		case acceptPB.Focused():
-			log.Println("[Editor-Focus] 焦点 -> [保存] 按钮 (Enter 键绑定保存)")
-			_ = dlg.SetCancelButton(cancelPB)
-			_ = dlg.SetDefaultButton(acceptPB)
-
-		case cancelPB.Focused():
-			log.Println("[Editor-Focus] 焦点 -> [取消] 按钮 (Enter 键绑定取消)")
-			// 必须先清空 CancelButton，否则 SetDefaultButton(cancelPB) 会被 Walk 拒绝！
-			_ = dlg.SetDefaultButton(nil)
-			_ = dlg.SetCancelButton(nil)
-			_ = dlg.SetDefaultButton(cancelPB)
-
-		default:
-			// 焦点在文本输入框内部：清空 DefaultButton，保障 Enter 跳格与多行换行
-			_ = dlg.SetDefaultButton(nil)
-			_ = dlg.SetCancelButton(cancelPB)
-		}
-	}
-
-	acceptPB.FocusedChanged().Attach(updateButtonRoles)
-	cancelPB.FocusedChanged().Attach(updateButtonRoles)
-
-	// 补充兜底：若焦点在取消按钮上按 Esc 也能正常退出
-	cancelPB.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyEscape {
-			dlg.Cancel()
-		}
-	})
-	acceptPB.KeyDown().Attach(func(key walk.Key) {
-		if key == walk.KeyEscape {
-			dlg.Cancel()
-		}
-	})
-
-	// 初始默认状态
+	// 1. 原生 Esc 绑定全局取消
 	_ = dlg.SetCancelButton(cancelPB)
-	_ = dlg.SetDefaultButton(nil)
 
-	// =========================================================================
-	// 输入框按键流处理
-	// =========================================================================
+	// 2. 注入底层子类化：彻底接管回车键，且绝不产生焦点重入死锁
+	setupButtonSubclass(acceptPB.Handle(), func() {
+		log.Println("[Editor] 焦点在“保存”按钮，按 Enter 触发保存")
+		dlg.Accept()
+	})
+	setupButtonSubclass(cancelPB.Handle(), func() {
+		log.Println("[Editor] 焦点在“取消”按钮，按 Enter 触发取消")
+		dlg.Cancel()
+	})
+
+	defer func() {
+		restoreButtonSubclass(acceptPB.Handle())
+		restoreButtonSubclass(cancelPB.Handle())
+		dlg.Dispose()
+	}()
+
+	// 3. 输入框回车跳转与快捷保存（纯静态绑定，无任何焦点联动副作用）
+	inputs := findInputWidgets(dlg)
 	for i, input := range inputs {
 		idx := i
-		input.FocusedChanged().Attach(updateButtonRoles)
-
 		switch w := input.(type) {
 		case *walk.LineEdit:
 			w.KeyDown().Attach(func(key walk.Key) {
@@ -154,12 +183,6 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 				}
 			})
 		case *walk.TextEdit:
-			hwnd := w.Handle()
-			style := win.GetWindowLong(hwnd, win.GWL_STYLE)
-			if style&0x1000 == 0 {
-				win.SetWindowLong(hwnd, win.GWL_STYLE, style|0x1000)
-				win.SetWindowPos(hwnd, 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_FRAMECHANGED)
-			}
 			w.KeyDown().Attach(func(key walk.Key) {
 				if (key == walk.KeyReturn || key == walk.Key('S')) && walk.ModifiersDown() == walk.ModControl {
 					log.Println("[Editor] 多行文本框按下 Ctrl+Enter / Ctrl+S -> 快捷保存")
@@ -173,16 +196,12 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		cfg.OnReady(dlg)
 	}
 
-	defer dlg.Dispose()
-
 	dlg.Starting().Attach(func() {
 		lockWindowSize(dlg.Handle())
 		centerDialog(dlg, owner, hActive)
 	})
 
-	// =========================================================================
-	// 【标准实现】：聚焦首个输入框，并将光标精准停在末尾（不全选）
-	// =========================================================================
+	// 4. 打开弹窗：聚焦第 1 个输入框，光标精准停在末尾（不全选）
 	dlg.Activating().Attach(func() {
 		if len(inputs) > 0 {
 			firstInput := inputs[0]
@@ -190,7 +209,6 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 
 			if le, ok := firstInput.(*walk.LineEdit); ok {
 				textLen := len([]rune(le.Text()))
-				// 起始与结束位置相同，即取消全选高亮，将光标（Caret）停在末尾
 				le.SetTextSelection(textLen, textLen)
 				log.Printf("[Editor] 弹窗展示，默认聚焦第 1 个输入框，光标定位于文字末尾 (下标: %d)", textLen)
 			}
