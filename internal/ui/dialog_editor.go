@@ -67,15 +67,18 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		},
 	)
 
-	err := Dialog{
+	// 使用直接判定避免变量未使用的编译报错
+	if err := (Dialog{
 		AssignTo: &dlg,
 		Title:    cfg.Title,
 		MinSize:  Size{Width: cfg.Width, Height: cfg.MinHeight},
 		Layout:   VBox{Margins: Margins{Left: 18, Top: 15, Right: 18, Bottom: 15}, Spacing: 12},
 		Children: layoutChildren,
-	}.Create(owner)
+	}.Create(owner)); err != nil {
+		log.Printf("[Editor] 弹窗创建失败: %v", err)
+		return EditorResult{Accepted: false, Error: err}
+	}
 
-	// 调用方式完全不变
 	cleanupKeyFlow := SetupDialogKeyFlow(dlg, acceptPB, cancelPB)
 	defer func() {
 		cleanupKeyFlow()
@@ -88,11 +91,11 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 
 	dlg.Starting().Attach(func() {
 		lockWindowSize(dlg.Handle())
-		centerDialog(dlg, owner) // 匹配 dialog_util.go 的 2 个参数
+		centerDialog(dlg, owner)
 	})
 
 	dlg.SizeChanged().Attach(func() {
-		centerDialog(dlg, owner) // 匹配 dialog_util.go 的 2 个参数
+		centerDialog(dlg, owner)
 	})
 
 	dlg.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
