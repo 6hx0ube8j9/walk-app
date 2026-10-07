@@ -1,7 +1,7 @@
 package ui
 
 import (
-	"fmt"
+	"log"
 	"unsafe"
 
 	"github.com/tailscale/walk"
@@ -51,6 +51,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 					Text:     cfg.AcceptBtnText,
 					MinSize:  Size{Width: 80, Height: 26},
 					OnClicked: func() {
+						log.Println("[Editor] 点击了“保存”按钮")
 						dlg.Accept()
 					},
 				},
@@ -59,6 +60,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 					Text:     cfg.CancelBtnText,
 					MinSize:  Size{Width: 80, Height: 26},
 					OnClicked: func() {
+						log.Println("[Editor] 点击了“取消”按钮")
 						dlg.Cancel()
 					},
 				},
@@ -75,25 +77,28 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 	}.Create(owner)
 
 	if err != nil {
+		log.Printf("[Editor] 弹窗创建失败: %v", err)
 		return EditorResult{Accepted: false, Error: err}
 	}
 
-	// 1. Esc 键绑定取消按钮
+	// 1. Esc 绑定取消
 	_ = dlg.SetCancelButton(cancelPB)
 
-	// 2. 焦点在“保存”按钮按 Enter 保存；焦点在“取消”按钮按 Enter 取消
+	// 2. 焦点在按钮上时的回车处理
 	acceptPB.KeyDown().Attach(func(key walk.Key) {
 		if key == walk.KeyReturn {
+			log.Println("[Editor] 焦点在“保存”按钮，按 Enter 触发保存")
 			dlg.Accept()
 		}
 	})
 	cancelPB.KeyDown().Attach(func(key walk.Key) {
 		if key == walk.KeyReturn {
+			log.Println("[Editor] 焦点在“取消”按钮，按 Enter 触发取消")
 			dlg.Cancel()
 		}
 	})
 
-	// 3. 收集所有输入框，构建顺畅的 Enter 焦点流转链
+	// 3. 收集输入框，处理 Enter 跳转与 Ctrl+Enter 快捷提交
 	inputs := findInputWidgets(dlg)
 	for i, input := range inputs {
 		idx := i
@@ -101,31 +106,35 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		case *walk.LineEdit:
 			w.KeyDown().Attach(func(key walk.Key) {
 				if key == walk.KeyReturn {
-					// Ctrl+Enter: 随时直接保存
+					// Ctrl+Enter 直接保存
 					if walk.ModifiersDown() == walk.ModControl {
+						log.Printf("[Editor] 在输入框 %d 按下 Ctrl+Enter，快捷保存", idx+1)
 						dlg.Accept()
 						return
 					}
+					// 普通 Enter: 焦点流转到下一控件
 					if walk.ModifiersDown() == 0 {
 						if idx+1 < len(inputs) {
+							log.Printf("[Editor] 输入框 %d 按 Enter -> 光标流转至输入框 %d", idx+1, idx+2)
 							inputs[idx+1].SetFocus()
 						} else {
+							log.Printf("[Editor] 最后一个输入框按 Enter -> 焦点移至保存按钮")
 							acceptPB.SetFocus()
 						}
 					}
 				}
 			})
 		case *walk.TextEdit:
-			// 注入 ES_WANTRETURN (0x1000)，确保敲 Enter 原生换行
+			// 注入 ES_WANTRETURN，确保 Enter 键换行
 			hwnd := w.Handle()
 			style := win.GetWindowLong(hwnd, win.GWL_STYLE)
 			if style&0x1000 == 0 {
 				win.SetWindowLong(hwnd, win.GWL_STYLE, style|0x1000)
 				win.SetWindowPos(hwnd, 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_FRAMECHANGED)
 			}
-			// 多行框内支持 Ctrl+Enter 或 Ctrl+S 快速保存
 			w.KeyDown().Attach(func(key walk.Key) {
 				if (key == walk.KeyReturn || key == walk.Key('S')) && walk.ModifiersDown() == walk.ModControl {
+					log.Println("[Editor] 在多行文本框按下 Ctrl+Enter / Ctrl+S，快捷保存")
 					dlg.Accept()
 				}
 			})
@@ -143,6 +152,19 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		centerDialog(dlg, owner, hActive)
 	})
 
+	// 【核心逻辑】：弹窗激活时，默认将焦点给到第 1 个输入框，让用户立即打字
+	dlg.Activating().Attach(func() {
+		if len(inputs) > 0 {
+			firstInput := inputs[0]
+			firstInput.SetFocus()
+			if le, ok := firstInput.(*walk.LineEdit); ok {
+				le.SetTextSelection(0, -1)
+			}
+				
+			log.Println("[Editor] 弹窗展示，默认焦点已自动赋予第 1 个输入框")
+		}
+	})
+
 	dlg.SizeChanged().Attach(func() {
 		centerDialog(dlg, owner, hActive)
 	})
@@ -153,11 +175,15 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 				ok, err := cfg.OnAccept()
 				if !ok {
 					*canceled = true
+					log.Println("[Editor] 业务校验未通过，拦截关闭")
 					return
 				}
 				processErr = err
 			}
 			isAccepted = true
+			log.Println("[Editor] 编辑完成并确认保存")
+		} else {
+			log.Println("[Editor] 放弃保存，退出编辑窗")
 		}
 
 		if !*canceled {
@@ -165,6 +191,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		}
 	})
 
+	log.Printf("[Editor] 正在展示编辑窗口: %s", cfg.Title)
 	dlg.Run()
 
 	return EditorResult{Accepted: isAccepted, Error: processErr}
@@ -179,12 +206,12 @@ func OpenTestEditorDialog(owner walk.Form) EditorResult {
 		Width:     450,
 		MinHeight: 320,
 		Widgets: []Widget{
-			Label{Text: "配置项名称（单行框，按 Enter 跳转到下方内容框）："},
+			Label{Text: "配置项名称（单行，按 Enter 跳转到内容框）："},
 			LineEdit{
 				AssignTo: &nameLE,
 				Text:     "测试规则项目_01",
 			},
-			Label{Text: "规则内容（多行框，按 Enter 换行，Ctrl+Enter 保存）："},
+			Label{Text: "规则内容（多行，按 Enter 换行，Ctrl+Enter 保存）："},
 			TextEdit{
 				AssignTo: &contentTE,
 				Text:     "rules:\r\n  - DOMAIN-SUFFIX,google.com,Proxy\r\n  - GEOIP,CN,DIRECT",
@@ -192,7 +219,7 @@ func OpenTestEditorDialog(owner walk.Form) EditorResult {
 			},
 		},
 		OnAccept: func() (bool, error) {
-			fmt.Printf("[测试] 保存成功！名称: %s, 内容行数: %d\n", nameLE.Text(), len(contentTE.Text()))
+			log.Printf("[Editor-Result] 校验通过 -> 名称: %s, 内容行数: %d", nameLE.Text(), len(contentTE.Text()))
 			return true, nil
 		},
 	}
@@ -200,11 +227,6 @@ func OpenTestEditorDialog(owner walk.Form) EditorResult {
 	return RunEditor(owner, cfg)
 }
 
-// -----------------------------------------------------------------------------
-// 辅助函数
-// -----------------------------------------------------------------------------
-
-// findInputWidgets 深度遍历容器，按声明顺序抓取所有的可输入控件
 func findInputWidgets(container walk.Container) []walk.Widget {
 	if container == nil || container.Children() == nil {
 		return nil
