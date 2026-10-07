@@ -93,11 +93,11 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 
 	dlg.Starting().Attach(func() {
 		lockWindowSize(dlg.Handle())
-		centerDialog(dlg, owner, hActive)
+		centerDialog(dlg, owner) // 匹配 dialog_util.go 的 2 个参数
 	})
 
 	dlg.SizeChanged().Attach(func() {
-		centerDialog(dlg, owner, hActive)
+		centerDialog(dlg, owner) // 匹配 dialog_util.go 的 2 个参数
 	})
 
 	dlg.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
@@ -156,4 +156,14 @@ func OpenTestEditorDialog(owner walk.Form) EditorResult {
 	}
 
 	return RunEditor(owner, cfg)
+}
+
+func restoreFocus(parent walk.Form, hActive win.HWND) {
+	if parent != nil && parent.Visible() && !win.IsIconic(parent.Handle()) {
+		win.SetForegroundWindow(parent.Handle())
+		win.SetFocus(parent.Handle())
+	} else if hActive != 0 && !win.IsIconic(hActive) {
+		win.SetForegroundWindow(hActive)
+		win.SetFocus(hActive)
+	}
 }
