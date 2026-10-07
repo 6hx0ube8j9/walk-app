@@ -94,7 +94,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		}
 	})
 
-	// 3. 多行文本框 TextEdit：注入 ES_WANTRETURN 确保 Enter 原生换行，Ctrl+Enter / Ctrl+S 快捷保存
+	// 3. 多行文本框 TextEdit：注入 ES_WANTRETURN (0x1000) 确保 Enter 换行，Ctrl+Enter / Ctrl+S 快捷保存
 	textEdits := findTextEdits(dlg)
 	for _, te := range textEdits {
 		curTE := te
@@ -143,3 +143,163 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 				ok, err := cfg.OnAccept()
 				if !ok {
 					*canceled = true
+					return
+				}
+				processErr = err
+			}
+			isAccepted = true
+		}
+
+		if !*canceled {
+			restoreFocus(owner, hActive)
+		}
+	})
+
+	dlg.Run()
+
+	return EditorResult{Accepted: isAccepted, Error: processErr}
+}
+
+// OpenTestEditorDialog 供托盘测试菜单调用的样板窗口
+func OpenTestEditorDialog(owner walk.Form) EditorResult {
+	var nameLE *walk.LineEdit
+	var contentTE *walk.TextEdit
+
+	cfg := EditorConfig{
+		Title:     "配置内容编辑测试",
+		Width:     450,
+		MinHeight: 320,
+		Widgets: []Widget{
+			Label{Text: "配置项名称（单行框，敲 Enter 触发保存）："},
+			LineEdit{
+				AssignTo: &nameLE,
+				Text:     "测试规则项目_01",
+			},
+			Label{Text: "规则内容（多行框，敲 Enter 换行，Ctrl+Enter 保存）："},
+			TextEdit{
+				AssignTo: &contentTE,
+				Text:     "rules:\r\n  - DOMAIN-SUFFIX,google.com,Proxy\r\n  - GEOIP,CN,DIRECT",
+				VScroll:  true,
+			},
+		},
+		OnAccept: func() (bool, error) {
+			fmt.Printf("[测试] 保存成功！名称: %s, 内容行数: %d\n", nameLE.Text(), len(contentTE.Text()))
+			return true, nil
+		},
+	}
+
+	return RunEditor(owner, cfg)
+}
+
+// -----------------------------------------------------------------------------
+// 内置辅助函数：控件扫描与窗口位置管理
+// -----------------------------------------------------------------------------
+
+func findTextEdits(container walk.Container) []*walk.TextEdit {
+	if container == nil || container.Children() == nil {
+		return nil
+	}
+	var list []*walk.TextEdit
+	for i := 0; i < container.Children().Len(); i++ {
+		child := container.Children().At(i)
+		if te, ok := child.(*walk.TextEdit); ok {
+			list = append(list, te)
+		} else if c, ok := child.(walk.Container); ok {
+			list = append(list, findTextEdits(c)...)
+		}
+	}
+	return list
+}
+
+func findLineEdits(container walk.Container) []*walk.LineEdit {
+	if container == nil || container.Children() == nil {
+		return nil
+	}
+	var list []*walk.LineEdit
+	for i := 0; i < container.Children().Len(); i++ {
+		child := container.Children().At(i)
+		if le, ok := child.(*walk.LineEdit); ok {
+			list = append(list, le)
+		} else if c, ok := child.(walk.Container); ok {
+			list = append(list, findLineEdits(c)...)
+		}
+	}
+	return list
+}
+
+func lockWindowSize(hwnd win.HWND) {
+	style := win.GetWindowLong(hwnd, win.GWL_STYLE)
+	style &^= win.WS_THICKFRAME | win.WS_MAXIMIZEBOX
+	win.SetWindowLong(hwnd, win.GWL_STYLE, style)
+	win.SetWindowPos(hwnd, 0, 0, 0, 0, 0, win.SWP_NOMOVE|win.SWP_NOSIZE|win.SWP_NOZORDER|win.SWP_FRAMECHANGED)
+}
+
+func centerDialog(dlg *walk.Dialog, owner walk.Form, hActive win.HWND) {
+	if dlg == nil {
+		return
+	}
+
+	var dRect win.RECT
+	win.GetWindowRect(dlg.Handle(), &dRect)
+	dlgW := dRect.Right - dRect.Left
+	dlgH := dRect.Bottom - dRect.Top
+
+	var dcRect win.RECT
+	win.GetClientRect(dlg.Handle(), &dcRect)
+	dPtLT := win.POINT{X: 0, Y: 0}
+	win.ClientToScreen(dlg.Handle(), &dPtLT)
+
+	dcOffsetCX := (dPtLT.X - dRect.Left) + dcRect.Right/2
+	dcOffsetCY := (dPtLT.Y - dRect.Top) + dcRect.Bottom/2
+
+	var workArea win.RECT
+	win.SystemParametersInfo(0x0030, 0, unsafe.Pointer(&workArea), 0)
+
+	var x, y int32
+	shouldFollowOwner := owner != nil && owner.Visible() && !win.IsIconic(owner.Handle())
+
+	if shouldFollowOwner && hActive != 0 && hActive != owner.Handle() {
+		shouldFollowOwner = false
+	}
+
+	if shouldFollowOwner {
+		var pClientRect win.RECT
+		win.GetClientRect(owner.Handle(), &pClientRect)
+
+		ptLT := win.POINT{X: 0, Y: 0}
+		win.ClientToScreen(owner.Handle(), &ptLT)
+
+		pCX := ptLT.X + pClientRect.Right/2
+		pCY := ptLT.Y + pClientRect.Bottom/2
+
+		x = pCX - dcOffsetCX
+		y = pCY - dcOffsetCY
+	} else {
+		x = workArea.Left + (workArea.Right-workArea.Left-dlgW)/2
+		y = workArea.Top + (workArea.Bottom-workArea.Top-dlgH)/2
+	}
+
+	if x < workArea.Left {
+		x = workArea.Left
+	} else if x+dlgW > workArea.Right {
+		x = workArea.Right - dlgW
+	}
+
+	if y < workArea.Top {
+		y = workArea.Top
+	} else if y+dlgH > workArea.Bottom {
+		y = workArea.Bottom - dlgH
+	}
+
+	win.SetWindowPos(dlg.Handle(), win.HWND_TOP, x, y, 0, 0, win.SWP_NOSIZE)
+}
+
+func restoreFocus(parent walk.Form, hActive win.HWND) {
+	if parent != nil && parent.Visible() && !win.IsIconic(parent.Handle()) {
+		win.SetForegroundWindow(parent.Handle())
+		win.SetFocus(parent.Handle())
+	} else if hActive != 0 && !win.IsIconic(hActive) {
+		win.SetForegroundWindow(hActive)
+		win.SetFocus(hActive)
+	}
+}
