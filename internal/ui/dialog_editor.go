@@ -75,12 +75,7 @@ func RunEditor(owner walk.Form, cfg EditorConfig) EditorResult {
 		Children: layoutChildren,
 	}.Create(owner)
 
-	if err != nil {
-		log.Printf("[Editor] 弹窗创建失败: %v", err)
-		return EditorResult{Accepted: false, Error: err}
-	}
-
-	// 挂载独立解耦的键盘流引擎（接管 Enter、Ctrl+Enter、Esc 与光标首焦）
+	// 调用方式完全不变
 	cleanupKeyFlow := SetupDialogKeyFlow(dlg, acceptPB, cancelPB)
 	defer func() {
 		cleanupKeyFlow()
