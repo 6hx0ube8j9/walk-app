@@ -29,14 +29,11 @@ var (
 	procSetConsoleTitle = kernel32.NewProc("SetConsoleTitleW")
 )
 
-const attachParentProcess = ^uintptr(0) // (DWORD)-1
+const attachParentProcess = ^uintptr(0)
 
-// setupDebugConsole 激活控制台并重定向输出流，兼容 -H=windowsgui 模式
 func setupDebugConsole(title string) {
-	// 1. 优先附着到调用它的终端（CMD / PowerShell）
 	r, _, _ := procAttachConsole.Call(attachParentProcess)
 	if r == 0 {
-		// 2. 若不是从终端启动（例如直接双击 EXE），分配独立的控制台窗口
 		procAllocConsole.Call()
 	}
 
@@ -45,7 +42,6 @@ func setupDebugConsole(title string) {
 		procSetConsoleTitle.Call(uintptr(unsafe.Pointer(t)))
 	}
 
-	// 3. 强制重定向 os.Stdout、os.Stderr 和 log 至当前控制台输出设备
 	conout, err := os.OpenFile("CONOUT$", os.O_WRONLY, 0644)
 	if err == nil {
 		os.Stdout = conout
@@ -60,7 +56,6 @@ func init() {
 }
 
 func main() {
-	// 命令行参数支持：默认开启控制台监听，可通过 -nolog 关闭
 	noLog := flag.Bool("nolog", false, "关闭控制台调试日志")
 	flag.Parse()
 
@@ -68,36 +63,72 @@ func main() {
 		setupDebugConsole(AppName + " [实时日志控制台]")
 	}
 
-	log.Println(">>> 进程启动，正在检查单例锁...")
+	log.Println(">>> 进程启动，检查单例锁...")
 
-	// 1. 进程防多开
 	lock, ok := platform.AcquireSingleInstance(MutexName, AppName)
 	if !ok {
-		log.Println("[WARN] 已存在运行中的实例，退出当前进程")
+		log.Println("[WARN] 已存在运行实例，退出")
 		return
 	}
 	defer lock.Release()
 	log.Println("[OK] 单例锁获取成功")
 
-	// 2. 初始化底层 GUI 运行环境
 	walkApp, err := walk.InitApp()
 	if err != nil {
 		log.Fatalf("[FATAL] 初始化应用失败: %v", err)
 	}
-	log.Println("[OK] Walk GUI 引擎初始化完毕")
+	log.Println("[OK] GUI 引擎初始化完成")
 
-	// 3. 构建 MVI 通信管道与实时监听透传代理
-	// 底层真实管道
 	rawCmdCh := make(chan types.UICommand, 32)
 	rawStateCh := make(chan types.UIState, 1)
 	rawEffectCh := make(chan types.UIEffect, 16)
 
-	// 对外暴露管道（带日志拦截）
 	uiCmdCh := make(chan types.UICommand, 32)
 	uiStateCh := make(chan types.UIState, 1)
 	uiEffectCh := make(chan types.UIEffect, 16)
 
-	// 监听并打印 UI -> Core 的指令 (UICommand)
 	go func() {
 		for cmd := range uiCmdCh {
-			log.Printf("[UI -> CORE] 指令: Action=%-1
+			log.Printf("[UI->CORE] 指令: %s, 内容: %v", cmd.Action, cmd.Payload)
+			rawCmdCh <- cmd
+		}
+	}()
+
+	go func() {
+		for state := range rawStateCh {
+			log.Printf("[CORE->UI] 状态更新: %+v", state)
+			select {
+			case uiStateCh <- state:
+			default:
+				select {
+				case <-uiStateCh:
+				default:
+				}
+				uiStateCh <- state
+			}
+		}
+	}()
+
+	go func() {
+		for effect := range rawEffectCh {
+			log.Printf("[CORE->UI] 副作用: %+v", effect)
+			uiEffectCh <- effect
+		}
+	}()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	svc := core.NewService(rawCmdCh, rawStateCh, rawEffectCh)
+	go svc.Run(ctx)
+	log.Println("[OK] 核心服务启动完成")
+
+	_, err = ui.NewUIEngine(walkApp, uiCmdCh, uiStateCh, uiEffectCh, AppName)
+	if err != nil {
+		log.Fatalf("[FATAL] 初始化 UI 失败: %v", err)
+	}
+	log.Println("[OK] UI 挂载成功，进入消息循环")
+
+	walkApp.Run()
+	log.Println(">>> 进程主循环退出")
+}
