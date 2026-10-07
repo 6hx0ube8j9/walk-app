@@ -23,10 +23,12 @@ const (
 )
 
 var (
-	kernel32            = syscall.NewLazyDLL("kernel32.dll")
-	procAllocConsole    = kernel32.NewProc("AllocConsole")
-	procAttachConsole   = kernel32.NewProc("AttachConsole")
-	procSetConsoleTitle = kernel32.NewProc("SetConsoleTitleW")
+	kernel32               = syscall.NewLazyDLL("kernel32.dll")
+	procAllocConsole       = kernel32.NewProc("AllocConsole")
+	procAttachConsole      = kernel32.NewProc("AttachConsole")
+	procSetConsoleTitle    = kernel32.NewProc("SetConsoleTitleW")
+	procSetConsoleCP       = kernel32.NewProc("SetConsoleCP")
+	procSetConsoleOutputCP = kernel32.NewProc("SetConsoleOutputCP")
 )
 
 const attachParentProcess = ^uintptr(0)
@@ -36,6 +38,9 @@ func setupDebugConsole(title string) {
 	if r == 0 {
 		procAllocConsole.Call()
 	}
+
+	procSetConsoleCP.Call(65001)
+	procSetConsoleOutputCP.Call(65001)
 
 	if title != "" {
 		t, _ := syscall.UTF16PtrFromString(title)
@@ -87,7 +92,6 @@ func main() {
 	uiStateCh := make(chan types.UIState, 1)
 	uiEffectCh := make(chan types.UIEffect, 16)
 
-	// 打印 UI 指令
 	go func() {
 		for cmd := range uiCmdCh {
 			log.Printf("[UI->CORE] 指令: %+v", cmd)
@@ -95,7 +99,6 @@ func main() {
 		}
 	}()
 
-	// 打印状态更新
 	go func() {
 		for state := range rawStateCh {
 			log.Printf("[CORE->UI] 状态更新: %+v", state)
@@ -111,7 +114,6 @@ func main() {
 		}
 	}()
 
-	// 打印副作用
 	go func() {
 		for effect := range rawEffectCh {
 			log.Printf("[CORE->UI] 副作用: %+v", effect)
