@@ -87,13 +87,15 @@ func main() {
 	uiStateCh := make(chan types.UIState, 1)
 	uiEffectCh := make(chan types.UIEffect, 16)
 
+	// 打印 UI 指令
 	go func() {
 		for cmd := range uiCmdCh {
-			log.Printf("[UI->CORE] 指令: %s, 内容: %v", cmd.Action, cmd.Payload)
+			log.Printf("[UI->CORE] 指令: %+v", cmd)
 			rawCmdCh <- cmd
 		}
 	}()
 
+	// 打印状态更新
 	go func() {
 		for state := range rawStateCh {
 			log.Printf("[CORE->UI] 状态更新: %+v", state)
@@ -109,6 +111,7 @@ func main() {
 		}
 	}()
 
+	// 打印副作用
 	go func() {
 		for effect := range rawEffectCh {
 			log.Printf("[CORE->UI] 副作用: %+v", effect)
