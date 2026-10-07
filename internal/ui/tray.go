@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"log"
 	"syscall"
 	"unsafe"
 	"walk-app/internal/types"
@@ -37,18 +38,23 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 
 	ni.MouseDown().Attach(func(x, y int, button walk.MouseButton) {
 		if button == walk.LeftButton {
+			log.Println("[Tray] 左键单机托盘图标 -> 切换主窗口可见性")
 			engine.ToggleWindow()
 		}
 	})
 
 	showAction := walk.NewAction()
 	showAction.SetText("显示/隐藏主界面")
-	showAction.Triggered().Attach(engine.ToggleWindow)
+	showAction.Triggered().Attach(func() {
+		log.Println("[Tray] 菜单点击: 显示/隐藏主界面")
+		engine.ToggleWindow()
+	})
 	ni.ContextMenu().Actions().Add(showAction)
 
 	syncAction := walk.NewAction()
 	syncAction.SetText("同步数据")
 	syncAction.Triggered().Attach(func() {
+		log.Println("[Tray] 菜单点击: 同步数据 -> 向 Core 发送 sync_data")
 		if engine.cmdCh != nil {
 			engine.cmdCh <- types.UICommand{Action: "sync_data"}
 		}
@@ -57,13 +63,10 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 
 	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
 
-	// -------------------------------------------------------------------------
-	// 测试动作菜单组
-	// -------------------------------------------------------------------------
-
 	testErrorAction := walk.NewAction()
 	testErrorAction.SetText("【测试】错误弹窗")
 	testErrorAction.Triggered().Attach(func() {
+		log.Println("[Tray] 菜单点击: 打开错误弹窗")
 		var parent walk.Form
 		if engine.view != nil && engine.view.Window != nil {
 			parent = engine.view.Window
@@ -75,23 +78,27 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 	testConfirmAction := walk.NewAction()
 	testConfirmAction.SetText("【测试】确认弹窗")
 	testConfirmAction.Triggered().Attach(func() {
+		log.Println("[Tray] 菜单点击: 打开确认弹窗")
 		var parent walk.Form
 		if engine.view != nil && engine.view.Window != nil {
 			parent = engine.view.Window
 		}
 
 		if ShowConfirmDialog(parent, "操作确认", "这是一个带提示音的测试弹窗，是否确认继续？") {
+			log.Println("[Tray] 确认弹窗被用户确认 -> 向 Core 发送 test_confirm_yes")
 			if engine.cmdCh != nil {
 				engine.cmdCh <- types.UICommand{Action: "test_confirm_yes"}
 			}
+		} else {
+			log.Println("[Tray] 确认弹窗被用户取消/关闭")
 		}
 	})
 	ni.ContextMenu().Actions().Add(testConfirmAction)
 
-	// 新增：测试多行编辑 Dialog 弹窗
 	testEditorAction := walk.NewAction()
 	testEditorAction.SetText("【测试】编辑弹窗")
 	testEditorAction.Triggered().Attach(func() {
+		log.Println("[Tray] 菜单点击: 唤起多行编辑弹窗")
 		var parent walk.Form
 		if engine.view != nil && engine.view.Window != nil {
 			parent = engine.view.Window
@@ -100,13 +107,12 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 	})
 	ni.ContextMenu().Actions().Add(testEditorAction)
 
-	// -------------------------------------------------------------------------
-
 	ni.ContextMenu().Actions().Add(walk.NewSeparatorAction())
 
 	exitAction := walk.NewAction()
 	exitAction.SetText("彻底退出")
 	exitAction.Triggered().Attach(func() {
+		log.Println("[Tray] 菜单点击: 彻底退出")
 		engine.Exit()
 	})
 	ni.ContextMenu().Actions().Add(exitAction)
@@ -133,7 +139,7 @@ func SetupTray(engine *UIEngine, toolTip string) (*TrayManager, error) {
 	})
 
 	if engine.view != nil && engine.view.Window != nil {
-		tm.oldWndProc = win.SetWindowLongPtr(engine.view.Window.Handle(), win.GWL_STYLE, newWndProc)
+		tm.oldWndProc = win.SetWindowLongPtr(engine.view.Window.Handle(), win.GWLP_WNDPROC, newWndProc)
 	}
 
 	if err := ni.SetVisible(true); err != nil {
